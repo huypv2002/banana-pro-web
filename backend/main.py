@@ -29,6 +29,18 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
 executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
 
+@app.on_event("startup")
+def startup_event():
+    """Pre-warm Chrome CDP on startup."""
+    profile = os.environ.get("CHROME_PROFILE_PATH")
+    if profile:
+        logger.info(f"Pre-warming Chrome CDP with profile: {profile}")
+        try:
+            LabsFlowClient._ensure_zendriver_worker(profile_path=profile)
+            logger.info("Chrome CDP ready.")
+        except Exception as e:
+            logger.warning(f"Chrome CDP pre-warm failed: {e}")
+
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
     "9:16": "IMAGE_ASPECT_RATIO_PORTRAIT",
