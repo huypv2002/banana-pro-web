@@ -5000,18 +5000,24 @@ class LabsFlowClient:
                     else:
                         aspect_ratio = "IMAGE_ASPECT_RATIO_SQUARE"
                 
-                # Upload image
-                upload_url = "https://aisandbox-pa.googleapis.com/v1:uploadUserImage"
+                # Upload image via Flow endpoint (returns media.name UUID)
+                upload_url = "https://aisandbox-pa.googleapis.com/v1/flow/uploadImage"
+                # Detect mime type
+                mime = "image/jpeg"
+                if image_path.lower().endswith(".png"):
+                    mime = "image/png"
+                elif image_path.lower().endswith(".webp"):
+                    mime = "image/webp"
                 upload_payload = {
-                    "imageInput": {
-                        "rawImageBytes": image_b64,
-                        "mimeType": "image/jpeg",
-                        "isUserUploaded": True,
-                        "aspectRatio": aspect_ratio,
-                    },
                     "clientContext": {
-                        "tool": "ASSET_MANAGER",
-                    }
+                        "projectId": self.flow_project_id,
+                        "tool": "PINHOLE",
+                    },
+                    "imageBytes": image_b64,
+                    "isUserUploaded": True,
+                    "isHidden": False,
+                    "mimeType": mime,
+                    "fileName": os.path.basename(image_path),
                 }
                 
                 resp = self.session.post(
