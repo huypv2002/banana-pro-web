@@ -3304,60 +3304,51 @@ class LabsFlowClient:
                     cls._chrome_cdp_user_data_dir = None
                     
                 if profile_path and os.path.exists(profile_path):
-                    # Copy profile thật vào temp dir để không lock profile gốc
-                    import shutil
+                    import shutil, subprocess
                     temp_dir = tempfile.mkdtemp(prefix="chrome_cdp_profile_")
                     try:
-                        # Copy toàn bộ profile (bao gồm cookies, localStorage, etc.)
-                        shutil.copytree(profile_path, temp_dir, dirs_exist_ok=True)
-                        # Xóa lock files để Chrome có thể mở
-                        for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
-                            lock_path = os.path.join(temp_dir, lock_file)
-                            if os.path.exists(lock_path):
-                                try:
-                                    os.remove(lock_path)
-                                except Exception:
-                                    pass
-                        # ✅ Xóa thêm các lock files trong Default/ subfolder
-                        default_dir = os.path.join(temp_dir, "Default")
-                        if os.path.exists(default_dir):
-                            for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile", "LOCK"]:
-                                lock_path = os.path.join(default_dir, lock_file)
-                                if os.path.exists(lock_path):
-                                    try:
-                                        os.remove(lock_path)
-                                    except Exception:
-                                        pass
-                            # Xóa lock trong Network subfolder (chứa Cookies DB)
-                            network_dir = os.path.join(default_dir, "Network")
-                            if os.path.exists(network_dir):
-                                for lock_file in ["LOCK", "lockfile"]:
-                                    lock_path = os.path.join(network_dir, lock_file)
-                                    if os.path.exists(lock_path):
-                                        try:
-                                            os.remove(lock_path)
-                                        except Exception:
-                                            pass
-                        
-                        # ✅ Validate: kiểm tra cookies DB tồn tại
-                        cookies_db = os.path.join(temp_dir, "Default", "Network", "Cookies")
-                        cookies_db_alt = os.path.join(temp_dir, "Default", "Cookies")
-                        if os.path.exists(cookies_db):
-                            print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
-                            print(f"  ✅ [Chrome CDP] Cookies DB found: {cookies_db} ({os.path.getsize(cookies_db)} bytes)")
-                        elif os.path.exists(cookies_db_alt):
-                            print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
-                            print(f"  ✅ [Chrome CDP] Cookies DB found (alt): {cookies_db_alt} ({os.path.getsize(cookies_db_alt)} bytes)")
-                        else:
-                            print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
-                            print(f"  ⚠️ [Chrome CDP] Cookies DB KHÔNG tìm thấy trong profile copy!")
-                        
-                        cls._chrome_cdp_user_data_dir = temp_dir
-                        cls._chrome_cdp_current_profile = profile_path
-                    except Exception as e:
-                        print(f"  ⚠️ [Chrome CDP] Không copy được profile: {e}, dùng temp dir trống")
-                        cls._chrome_cdp_user_data_dir = tempfile.mkdtemp(prefix="chrome_cdp_recaptcha_")
-                        cls._chrome_cdp_current_profile = None
+                        # ✅ Dùng robocopy /B (backup mode) để copy kể cả file bị Chrome lock
+                        result = subprocess.run(
+                            ["robocopy", profile_path, temp_dir, "/E", "/B", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS"],
+                            capture_output=True, timeout=30
+                        )
+                        # robocopy exit code < 8 là thành công
+                        if result.returncode >= 8:
+                            # Fallback sang shutil nếu robocopy fail
+                            shutil.copytree(profile_path, temp_dir, dirs_exist_ok=True, ignore_dangling_symlinks=True)
+                    except Exception:
+                        try:
+                            shutil.copytree(profile_path, temp_dir, dirs_exist_ok=True, ignore_dangling_symlinks=True)
+                        except Exception as e2:
+                            print(f"  ⚠️ [Chrome CDP] Copy profile lỗi: {e2}")
+                    
+                    # Xóa lock files
+                    for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+                        for d in [temp_dir, os.path.join(temp_dir, "Default")]:
+                            lp = os.path.join(d, lock_file)
+                            if os.path.exists(lp):
+                                try: os.remove(lp)
+                                except: pass
+                    for lock_file in ["LOCK", "lockfile"]:
+                        lp = os.path.join(temp_dir, "Default", "Network", lock_file)
+                        if os.path.exists(lp):
+                            try: os.remove(lp)
+                            except: pass
+
+                    cookies_db = os.path.join(temp_dir, "Default", "Network", "Cookies")
+                    cookies_db_alt = os.path.join(temp_dir, "Default", "Cookies")
+                    if os.path.exists(cookies_db):
+                        print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
+                        print(f"  ✅ [Chrome CDP] Cookies DB found: {cookies_db} ({os.path.getsize(cookies_db)} bytes)")
+                    elif os.path.exists(cookies_db_alt):
+                        print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
+                        print(f"  ✅ [Chrome CDP] Cookies DB found (alt): {cookies_db_alt} ({os.path.getsize(cookies_db_alt)} bytes)")
+                    else:
+                        print(f"  📂 [Chrome CDP] Dùng profile thật (copy): {profile_path}")
+                        print(f"  ⚠️ [Chrome CDP] Cookies DB KHÔNG tìm thấy trong profile copy!")
+
+                    cls._chrome_cdp_user_data_dir = temp_dir
+                    cls._chrome_cdp_current_profile = profile_path
                 else:
                     cls._chrome_cdp_user_data_dir = tempfile.mkdtemp(prefix="chrome_cdp_recaptcha_")
                     cls._chrome_cdp_current_profile = None
