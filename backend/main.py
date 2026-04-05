@@ -79,7 +79,10 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         if not cookies:
             raise ValueError("Cookie không hợp lệ. Vui lòng kiểm tra lại.")
 
-        client = LabsFlowClient(cookies)
+        client = LabsFlowClient(
+            cookies,
+            profile_path=os.environ.get("CHROME_PROFILE_PATH"),
+        )
 
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token. Cookie có thể đã hết hạn.")
