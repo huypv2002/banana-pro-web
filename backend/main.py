@@ -68,17 +68,10 @@ def _parse_cookie_input(raw: str) -> dict:
 
 def _extract_image_url(result: dict) -> str:
     try:
-        responses = result.get("responses") or result.get("mediaGenerations") or []
-        if isinstance(responses, list) and responses:
-            first = responses[0]
-            for key in ("imageUri", "imageUrl", "uri", "url", "gcsUri"):
-                if first.get(key):
-                    return first[key]
-            imgs = first.get("generatedImages") or first.get("images") or []
-            if imgs:
-                for key in ("imageUri", "imageUrl", "uri", "url", "gcsUri"):
-                    if imgs[0].get(key):
-                        return imgs[0][key]
+        media = result.get("media") or []
+        if media:
+            img = media[0].get("image", {}).get("generatedImage", {})
+            return img.get("fifeUrl") or img.get("imageUri") or img.get("uri") or ""
     except Exception:
         pass
     return ""
