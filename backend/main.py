@@ -7,15 +7,16 @@ from pathlib import Path
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor
 
+# ✅ Set env TRƯỚC khi import complete_flow (LabsFlowClient đọc env lúc __init__)
+os.environ["AUTO_RECAPTCHA"] = "1"
+os.environ["RECAPTCHA_MODE"] = "selenium"
+os.environ["SELENIUM_HEADLESS"] = "0"
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from complete_flow import LabsFlowClient, _parse_cookie_string
-
-os.environ.setdefault("AUTO_RECAPTCHA", "1")
-os.environ.setdefault("RECAPTCHA_MODE", "selenium")
-os.environ.setdefault("SELENIUM_HEADLESS", "0")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
