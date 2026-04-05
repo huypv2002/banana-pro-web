@@ -11,9 +11,7 @@ start "BananaPro-Server" cmd /k "cd /d C:\BananaPro\banana-pro-web\backend && se
 echo Waiting for server to start...
 timeout /t 6 /nobreak >nul
 
-:: Start cloudflare tunnel
-echo [2/2] Starting Cloudflare Tunnel...
+:: Start cloudflare tunnel (named - stable domain)
+echo [2/2] Starting Cloudflare Tunnel (api.sunnshineshop.asia)...
 echo.
-echo Copy the trycloudflare.com URL and send to Kiro to update Worker
-echo.
-cloudflared tunnel --url http://127.0.0.1:8088
+cloudflared tunnel --config C:\BananaPro\banana-pro-web\tunnel-config.yml run banana-pro

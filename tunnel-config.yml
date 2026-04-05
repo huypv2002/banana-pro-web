@@ -1,0 +1,7 @@
+tunnel: a8825846-fff6-4d61-a287-e416766ecbac
+credentials-file: C:\Users\Administrator\.cloudflared\a8825846-fff6-4d61-a287-e416766ecbac.json
+
+ingress:
+  - hostname: api.sunnshineshop.asia
+    service: http://127.0.0.1:8088
+  - service: http_status:404
