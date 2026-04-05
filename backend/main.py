@@ -15,9 +15,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ── Add gui_app_clone to path (phải có sẵn trên VPS tại C:\BananaPro\gui_app_clone) ──
-PARENT_DIR = Path(os.environ.get("GUI_APP_DIR", r"C:\BananaPro\gui_app_clone"))
-sys.path.insert(0, str(PARENT_DIR))
+# complete_flow.py nằm cùng thư mục backend/
 
 from complete_flow import LabsFlowClient, _parse_cookie_string
 
