@@ -2268,11 +2268,11 @@ class LabsFlowClient:
             "referer": "https://labs.google/",
             "sec-ch-ua": _env("SEC_CH_UA", '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"'),
             "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": _env("SEC_CH_UA_PLATFORM", '"macOS"'),
+            "sec-ch-ua-platform": _env("SEC_CH_UA_PLATFORM", '"Windows"'),
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "cross-site",
-            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+            "user-agent": _env("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"),
             "x-browser-channel": _env("X_BROWSER_CHANNEL", "stable"),
             "x-browser-copyright": _env(
                 "X_BROWSER_COPYRIGHT",
