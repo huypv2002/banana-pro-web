@@ -129,7 +129,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                 except Exception as e:
                     logger.warning(f"Upload ref image failed: {e}")
 
-        for prompt in prompts:
+        for idx, prompt in enumerate(prompts):
             if job.get("cancelled"):
                 break
             for _ in range(variants):
@@ -137,7 +137,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     break
                 try:
                     # Folder structure: match ảnh theo tên prompt
-                    image_inputs = list(global_image_inputs)
+                    image_inputs = list(global_image_inputs) if idx == 0 else []
                     if folder_images:
                         key = prompt.strip().lower()[:30]
                         for fname, imgs in folder_images.items():
