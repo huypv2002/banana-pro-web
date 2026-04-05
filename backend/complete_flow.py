@@ -6075,10 +6075,15 @@ class LabsFlowClient:
             # Extract workflow ID from response or use generated one
             actual_workflow_id = workflow_id
             if isinstance(result, dict):
-                # Try to extract from response if available
                 workflow_data = result.get("result", {}).get("data", {})
                 if isinstance(workflow_data, dict):
-                    actual_workflow_id = workflow_data.get("workflowId", workflow_id)
+                    # Try direct field first
+                    wid = workflow_data.get("workflowId")
+                    if not wid:
+                        # Nested: data.json.result.workflowId
+                        wid = (workflow_data.get("json", {}) or {}).get("result", {}).get("workflowId")
+                    if wid:
+                        actual_workflow_id = wid
             
             print(f"  ✓ Workflow ID: {actual_workflow_id}")
             return actual_workflow_id
