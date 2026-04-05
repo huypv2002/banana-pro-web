@@ -15,7 +15,18 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# complete_flow.py nằm cùng thư mục backend/
+import json as _json
+
+def _parse_cookie_input(raw: str) -> dict:
+    """Parse cookie từ JSON array (Cookie Editor) hoặc string name=value."""
+    raw = raw.strip()
+    if raw.startswith("["):
+        try:
+            items = _json.loads(raw)
+            return {c["name"]: c["value"] for c in items if "name" in c and "value" in c}
+        except Exception:
+            pass
+    return _parse_cookie_string(raw)
 
 from complete_flow import LabsFlowClient, _parse_cookie_string
 
@@ -75,7 +86,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
     job["status"] = "running"
 
     try:
-        cookies = _parse_cookie_string(cookie)
+        cookies = _parse_cookie_input(cookie)
         if not cookies:
             raise ValueError("Cookie không hợp lệ. Vui lòng kiểm tra lại.")
 
