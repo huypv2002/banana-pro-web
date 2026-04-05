@@ -1,12 +1,8 @@
 """
-FastAPI backend for Banana Pro image generation.
-Runs on VPS Windows. Wraps LabsFlowClient from complete_flow.py.
+FastAPI backend for Banana Pro (Flow) image generation.
+Runs on VPS Windows.
 """
-import os
-import sys
-import uuid
-import asyncio
-import logging
+import os, sys, uuid, time, asyncio, logging, json as _json
 from pathlib import Path
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor
@@ -15,10 +11,51 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import json as _json
+from complete_flow import LabsFlowClient, _parse_cookie_string
+
+os.environ.setdefault("AUTO_RECAPTCHA", "1")
+os.environ.setdefault("RECAPTCHA_MODE", "selenium")
+os.environ.setdefault("SELENIUM_HEADLESS", "0")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Banana Pro API", version="1.0.0")
+
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
+                   allow_methods=["*"], allow_headers=["*"])
+
+executor = ThreadPoolExecutor(max_workers=2)
+jobs: dict = {}
+
+ASPECT_MAP = {
+    "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
+    "9:16": "IMAGE_ASPECT_RATIO_PORTRAIT",
+    "1:1":  "IMAGE_ASPECT_RATIO_SQUARE",
+    "4:3":  "IMAGE_ASPECT_RATIO_LANDSCAPE",
+    "3:4":  "IMAGE_ASPECT_RATIO_PORTRAIT",
+}
+
+
+class GenerateRequest(BaseModel):
+    cookie: str
+    prompts: List[str]
+    model: str = "NARWHAL"
+    aspect_ratio: str = "16:9"
+    variants: int = 1
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: str
+    total: int
+    completed: int
+    images: List[dict]
+    error: Optional[str] = None
+
 
 def _parse_cookie_input(raw: str) -> dict:
-    """Parse cookie từ JSON array (Cookie Editor) hoặc string name=value."""
     raw = raw.strip()
     if raw.startswith("["):
         try:
@@ -28,80 +65,40 @@ def _parse_cookie_input(raw: str) -> dict:
             pass
     return _parse_cookie_string(raw)
 
-from complete_flow import LabsFlowClient, _parse_cookie_string
 
-# ── Env setup for reCAPTCHA (Chrome CDP headless on VPS) ──────────────────────
-os.environ.setdefault("AUTO_RECAPTCHA", "1")
-os.environ.setdefault("RECAPTCHA_MODE", "selenium")
-os.environ.setdefault("SELENIUM_HEADLESS", "1")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Banana Pro API", version="1.0.0")
-
-# ── CORS: allow Cloudflare Pages domain ───────────────────────────────────────
-ALLOWED_ORIGINS = os.environ.get(
-    "ALLOWED_ORIGINS",
-    "*"  # Thay bằng domain Cloudflare Pages của bạn khi deploy
-).split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Thread pool for blocking LabsFlowClient calls ─────────────────────────────
-executor = ThreadPoolExecutor(max_workers=4)
-
-# ── In-memory job store (dùng Redis nếu cần scale) ───────────────────────────
-jobs: dict = {}  # job_id -> {"status": ..., "images": [...], "error": ...}
+def _extract_image_url(result: dict) -> str:
+    try:
+        responses = result.get("responses") or result.get("mediaGenerations") or []
+        if isinstance(responses, list) and responses:
+            first = responses[0]
+            for key in ("imageUri", "imageUrl", "uri", "url", "gcsUri"):
+                if first.get(key):
+                    return first[key]
+            imgs = first.get("generatedImages") or first.get("images") or []
+            if imgs:
+                for key in ("imageUri", "imageUrl", "uri", "url", "gcsUri"):
+                    if imgs[0].get(key):
+                        return imgs[0][key]
+    except Exception:
+        pass
+    return ""
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
-class GenerateRequest(BaseModel):
-    cookie: str                          # Cookie string từ Cookie Editor
-    prompts: List[str]                   # Danh sách prompts
-    model: str = "NARWHAL"               # NARWHAL=Banana Pro 2, GEM_PIX_2=Banana Pro
-    aspect_ratio: str = "16:9"
-    variants: int = 1                    # Số ảnh mỗi prompt
-
-
-class JobStatus(BaseModel):
-    job_id: str
-    status: str                          # pending | running | done | error
-    total: int
-    completed: int
-    images: List[dict]
-    error: Optional[str] = None
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     model: str, aspect_ratio: str, variants: int):
-    """Blocking function chạy trong thread pool."""
     job = jobs[job_id]
     job["status"] = "running"
-
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
-            raise ValueError("Cookie không hợp lệ. Vui lòng kiểm tra lại.")
+            raise ValueError("Cookie không hợp lệ.")
 
-        client = LabsFlowClient(
-            cookies,
-            profile_path=os.environ.get("CHROME_PROFILE_PATH"),
-        )
-
+        client = LabsFlowClient(cookies, profile_path=os.environ.get("CHROME_PROFILE_PATH"))
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token. Cookie có thể đã hết hạn.")
 
-        # Tạo workflow mới cho session này
-        workflow_id = client.create_whisk_workflow()
-        if not workflow_id:
-            raise ValueError("Không thể tạo workflow. Cookie có thể đã hết hạn.")
+        project_id = client.flow_project_id
+        aspect = ASPECT_MAP.get(aspect_ratio, "IMAGE_ASPECT_RATIO_LANDSCAPE")
 
         for prompt in prompts:
             if job.get("cancelled"):
@@ -110,81 +107,55 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                 if job.get("cancelled"):
                     break
                 try:
-                    result = client.generate_image_from_text(
-                        workflow_id=workflow_id,
-                        prompt=prompt,
-                        image_model=model,
-                        aspect_ratio=aspect_ratio,
-                    )
+                    request_item = {
+                        "clientContext": {
+                            "sessionId": f";{int(time.time() * 1000)}",
+                            "projectId": project_id,
+                            "tool": "PINHOLE",
+                            "userPaygateTier": "PAYGATE_TIER_TWO",
+                        },
+                        "imageModelName": model,
+                        "imageAspectRatio": aspect,
+                        "structuredPrompt": {"parts": [{"text": prompt}]},
+                    }
+                    result = client.generate_flow_images([request_item], project_id=project_id)
                     if result:
-                        # result chứa image URL hoặc base64
-                        image_url = (
-                            result.get("imageUrl")
-                            or result.get("url")
-                            or result.get("image_url")
-                            or ""
-                        )
-                        job["images"].append({
-                            "prompt": prompt,
-                            "url": image_url,
-                            "model": model,
-                        })
+                        url = _extract_image_url(result)
+                        job["images"].append({"prompt": prompt, "url": url, "model": model})
                     else:
-                        job["images"].append({
-                            "prompt": prompt,
-                            "url": None,
-                            "error": client.last_error_detail or "Tạo ảnh thất bại",
-                        })
+                        job["images"].append({"prompt": prompt, "url": None,
+                                              "error": client.last_error_detail or "Tạo ảnh thất bại"})
                 except Exception as e:
-                    logger.error(f"[{job_id}] Error generating image: {e}")
-                    job["images"].append({
-                        "prompt": prompt,
-                        "url": None,
-                        "error": str(e),
-                    })
+                    job["images"].append({"prompt": prompt, "url": None, "error": str(e)})
                 finally:
                     job["completed"] += 1
 
         job["status"] = "done"
-
     except Exception as e:
-        logger.error(f"[{job_id}] Fatal error: {e}")
+        logger.error(f"[{job_id}] Fatal: {e}")
         job["status"] = "error"
         job["error"] = str(e)
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"ok": True}
 
 
 @app.post("/generate", response_model=JobStatus)
-async def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
+async def generate(req: GenerateRequest):
     if not req.prompts:
         raise HTTPException(400, "Cần ít nhất 1 prompt")
     if not req.cookie.strip():
         raise HTTPException(400, "Cookie không được để trống")
 
     job_id = str(uuid.uuid4())
-    total = len(req.prompts) * req.variants
-    jobs[job_id] = {
-        "status": "pending",
-        "total": total,
-        "completed": 0,
-        "images": [],
-        "error": None,
-        "cancelled": False,
-    }
+    jobs[job_id] = {"status": "pending", "total": len(req.prompts) * req.variants,
+                    "completed": 0, "images": [], "error": None, "cancelled": False}
 
-    # Chạy trong thread pool để không block event loop
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(
-        executor,
-        _run_generation,
-        job_id, req.cookie, req.prompts,
-        req.model, req.aspect_ratio, req.variants,
-    )
+    loop.run_in_executor(executor, _run_generation,
+                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants)
 
     return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 

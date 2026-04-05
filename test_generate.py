@@ -1,8 +1,8 @@
 """
-Test script: parse cookie + fetch access token + generate 1 ảnh.
-Chạy trên VPS: cd backend && python ..\test_generate.py
+Test Banana Pro (Flow) image generation - dùng generate_flow_images API.
+Chạy: python test_generate.py
 """
-import sys, os, json
+import sys, os, json, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
 
 os.environ["AUTO_RECAPTCHA"] = "1"
@@ -29,30 +29,24 @@ ok = client.fetch_access_token()
 if not ok:
     print("❌ Cookie hết hạn")
     sys.exit(1)
-print(f"✅ Token OK: {client.access_token[:30]}...")
+print(f"✅ Token OK")
 
-print("\n--- Create workflow ---")
-workflow_id = client.create_whisk_workflow()
-print(f"Workflow ID: {workflow_id}")
-if not workflow_id:
-    print("❌ Không tạo được workflow:", client.last_error_detail)
-    sys.exit(1)
+# Banana Pro dùng flow_project_id (hardcoded), không cần create_whisk_workflow
+project_id = client.flow_project_id
+print(f"\n✅ Project ID: {project_id}")
 
-print("\n--- Generate image (IMAGEN_3_5) ---")
-result = client.generate_image_from_text(
-    workflow_id=workflow_id,
-    prompt="a cute cat",
-    image_model="IMAGEN_3_5",
-    aspect_ratio="16:9",
-)
-print(f"\nResult IMAGEN_3_5: {result and 'OK' or 'None - ' + str(client.last_error_detail)}")
+print("\n--- Generate Banana Pro image (generate_flow_images) ---")
+request_item = {
+    "clientContext": {
+        "sessionId": f";{int(time.time() * 1000)}",
+        "projectId": project_id,
+        "tool": "PINHOLE",
+        "userPaygateTier": "PAYGATE_TIER_TWO",
+    },
+    "imageModelName": "NARWHAL",
+    "imageAspectRatio": "IMAGE_ASPECT_RATIO_LANDSCAPE",
+    "structuredPrompt": {"parts": [{"text": "a cute cat"}]},
+}
 
-if not result:
-    print("\n--- Generate image (GEM_PIX_2) ---")
-    result = client.generate_image_from_text(
-        workflow_id=workflow_id,
-        prompt="a cute cat",
-        image_model="GEM_PIX_2",
-        aspect_ratio="16:9",
-    )
-    print(f"\nResult GEM_PIX_2: {result and 'OK - ' + str(result)[:200] or 'None - ' + str(client.last_error_detail)}")
+result = client.generate_flow_images([request_item], project_id=project_id)
+print(f"\nResult: {json.dumps(result, indent=2) if result else 'None - ' + str(client.last_error_detail)}")
