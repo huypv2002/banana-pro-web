@@ -2,3 +2,14 @@ __pycache__/
 *.pyc
 .env
 *.log
+.playwright-mcp/
+.wrangler/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+.DS_Store
+tunnel-creds.json
+test_prompts.txt

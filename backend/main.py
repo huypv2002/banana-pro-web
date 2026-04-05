@@ -166,10 +166,14 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                             "tool": "PINHOLE",
                             "userPaygateTier": "PAYGATE_TIER_TWO",
                         },
-                        "imageModelName": model,
-                        "imageAspectRatio": aspect,
-                        "structuredPrompt": {"parts": [{"text": prompt}]},
                     }
+                    # ✅ Thêm seed TRƯỚC imageModelName khi có imageInputs (theo curl thật)
+                    if image_inputs:
+                        import random
+                        request_item["seed"] = random.randint(1, 999999)
+                    request_item["imageModelName"] = model
+                    request_item["imageAspectRatio"] = aspect
+                    request_item["structuredPrompt"] = {"parts": [{"text": prompt}]}
                     if image_inputs:
                         request_item["imageInputs"] = image_inputs
 
@@ -190,6 +194,34 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         logger.error(f"[{job_id}] Fatal: {e}")
         job["status"] = "error"
         job["error"] = str(e)
+
+
+class RecaptchaRequest(BaseModel):
+    cookie: str
+    action: str = "IMAGE_GENERATION"   # IMAGE_GENERATION | VIDEO_GENERATION
+
+@app.post("/recaptcha-token")
+def get_recaptcha_token(req: RecaptchaRequest):
+    """Lấy reCAPTCHA token từ Chrome headless trên VPS."""
+    try:
+        cookies = _parse_cookie_input(req.cookie)
+        if not cookies:
+            return {"ok": False, "error": "Cookie không hợp lệ"}
+        client = LabsFlowClient(cookies, profile_path=os.environ.get("CHROME_PROFILE_PATH"))
+        if not client.fetch_access_token():
+            return {"ok": False, "error": client.last_error_detail or "Không lấy được access token"}
+        ctx = {}
+        got = client._maybe_inject_recaptcha(ctx, raise_on_fail=False, recaptcha_action=req.action)
+        if got:
+            # convert nếu cần
+            token = ctx.get("recaptchaToken")
+            if not token:
+                rc = ctx.get("recaptchaContext", {})
+                token = rc.get("token")
+            return {"ok": True, "token": token, "access_token": client.access_token}
+        return {"ok": False, "error": client.last_error_detail or "Không lấy được reCAPTCHA token"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 class TestCookieRequest(BaseModel):

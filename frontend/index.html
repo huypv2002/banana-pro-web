@@ -7,23 +7,52 @@
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
+
+<!-- ═══ LOGIN SCREEN ═══ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">🍌</div>
+    <h2>Banana Pro</h2>
+    <p class="login-subtitle">Đăng nhập để tiếp tục</p>
+    <div id="loginTabs" class="login-tabs">
+      <button class="login-tab active" onclick="switchAuthTab('login')">Đăng nhập</button>
+      <button class="login-tab" onclick="switchAuthTab('register')">Đăng ký</button>
+    </div>
+    <form id="loginForm" onsubmit="return handleAuth(event)">
+      <input type="text" id="authUsername" placeholder="Tên đăng nhập" required autocomplete="username"/>
+      <input type="password" id="authPassword" placeholder="Mật khẩu" required autocomplete="current-password"/>
+      <div id="authError" class="auth-error" style="display:none"></div>
+      <button type="submit" class="btn btn-primary login-btn" id="authSubmitBtn">Đăng nhập</button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ MAIN APP (hidden until login) ═══ -->
+<div id="appScreen" style="display:none">
+
 <!-- HEADER -->
 <header class="header">
   <div class="header-left">
     <span class="logo">🍌</span>
     <span class="app-name">Banana Pro</span>
   </div>
+  <nav class="header-nav">
+    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">🎨 Tạo ảnh</button>
+    <button class="nav-btn" onclick="showTab('history')" id="navHistory">📜 Lịch sử</button>
+    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">👑 Admin</button>
+  </nav>
   <div class="header-right">
     <span id="userInfo" class="user-info"></span>
-    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Quản lý Cookie</button>
+    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
+    <button class="btn btn-outline" onclick="handleLogout()">🚪 Đăng xuất</button>
   </div>
 </header>
 
+<!-- ═══ TAB: GENERATE ═══ -->
+<div id="tabGenerate" class="tab-content">
 <div class="main-layout">
   <!-- LEFT PANEL -->
   <div class="left-panel" id="leftPanel">
-
-    <!-- CONFIG CARD -->
     <div class="card">
       <div class="card-title">⚙️ Cấu hình</div>
       <div class="form-grid">
@@ -34,7 +63,6 @@
           <option value="GEM_PIX">Gem Pix</option>
           <option value="IMAGEN_3_5">Imagen 4</option>
         </select>
-
         <label>Tỷ lệ khung</label>
         <select id="aspectSelect">
           <option value="16:9">16:9 Ngang</option>
@@ -43,42 +71,24 @@
           <option value="3:4">3:4 Dọc</option>
           <option value="1:1">1:1 Vuông</option>
         </select>
-
         <label>Số ảnh / prompt</label>
         <input type="number" id="variantsInput" value="1" min="1" max="10"/>
-
         <label>Delay (giây)</label>
         <input type="number" id="delayInput" value="8" min="1" max="300"/>
-
-        <label>Thư mục lưu ảnh</label>
-        <div class="input-note">Ảnh lưu tự động trên server</div>
       </div>
     </div>
 
-    <!-- MODE CARD -->
     <div class="card">
       <div class="card-title">🎨 Chế độ tạo ảnh</div>
       <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="mode" value="normal" checked onchange="setMode('normal')"/>
-          Thường (file .txt)
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="mode" value="multiple" onchange="setMode('multiple')"/>
-          Multiple-to-Image (folder ảnh)
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="mode" value="folder" onchange="setMode('folder')"/>
-          Folder Structure (folder cha)
-        </label>
+        <label class="radio-label"><input type="radio" name="mode" value="normal" checked onchange="setMode('normal')"/> Thường (file .txt)</label>
+        <label class="radio-label"><input type="radio" name="mode" value="multiple" onchange="setMode('multiple')"/> Multiple-to-Image</label>
+        <label class="radio-label"><input type="radio" name="mode" value="folder" onchange="setMode('folder')"/> Folder Structure</label>
       </div>
     </div>
 
-    <!-- PROMPT SOURCE CARD -->
     <div class="card" id="promptSourceCard">
       <div class="card-title">📄 Nguồn prompt (.txt)</div>
-      <p class="card-desc">Chọn 1 file hoặc 1 thư mục chứa nhiều file .txt để chạy hàng loạt.</p>
-
       <div class="field-row">
         <label>File .txt</label>
         <div class="input-btn-row">
@@ -87,7 +97,6 @@
           <input type="file" id="txtFileInput" accept=".txt" style="display:none" onchange="loadTxtFile(this)"/>
         </div>
       </div>
-
       <div class="field-row" style="margin-top:8px">
         <label>Thư mục .txt</label>
         <div class="input-btn-row">
@@ -96,53 +105,26 @@
           <input type="file" id="folderTxtInput" webkitdirectory style="display:none" onchange="loadFolderTxt(this)"/>
         </div>
       </div>
-
       <div style="text-align:right;margin-top:6px">
         <button class="btn btn-ghost" onclick="clearSources()">🧹 Xóa danh sách</button>
       </div>
-
       <table class="batch-table" id="batchTable">
         <thead><tr><th>STT</th><th>Tên File</th><th>Số Prompt</th><th>Trạng thái</th></tr></thead>
         <tbody id="batchTableBody"></tbody>
       </table>
     </div>
 
-    <!-- MULTIPLE-TO-IMAGE CARD -->
     <div class="card" id="multipleCard" style="display:none">
       <div class="card-title">🖼️ Thư mục ảnh tham chiếu</div>
-      <p class="card-desc">Chọn 3 folder chứa ảnh Subject/Scene/Style.</p>
       <div class="ref-folders">
-        <div class="field-row">
-          <label>Subject Folder</label>
-          <div class="input-btn-row">
-            <input type="text" id="subjectFolder" readonly placeholder="Thư mục ảnh Subject..."/>
-            <button class="btn btn-blue" onclick="document.getElementById('subjectFolderInput').click()">Chọn</button>
-            <input type="file" id="subjectFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('subject',this)"/>
-          </div>
-        </div>
-        <div class="field-row">
-          <label>Scene Folder</label>
-          <div class="input-btn-row">
-            <input type="text" id="sceneFolder" readonly placeholder="Thư mục ảnh Scene..."/>
-            <button class="btn btn-blue" onclick="document.getElementById('sceneFolderInput').click()">Chọn</button>
-            <input type="file" id="sceneFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('scene',this)"/>
-          </div>
-        </div>
-        <div class="field-row">
-          <label>Style Folder</label>
-          <div class="input-btn-row">
-            <input type="text" id="styleFolder" readonly placeholder="Thư mục ảnh Style..."/>
-            <button class="btn btn-blue" onclick="document.getElementById('styleFolderInput').click()">Chọn</button>
-            <input type="file" id="styleFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('style',this)"/>
-          </div>
-        </div>
+        <div class="field-row"><label>Subject</label><div class="input-btn-row"><input type="text" id="subjectFolder" readonly placeholder="Subject..."/><button class="btn btn-blue" onclick="document.getElementById('subjectFolderInput').click()">Chọn</button><input type="file" id="subjectFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('subject',this)"/></div></div>
+        <div class="field-row"><label>Scene</label><div class="input-btn-row"><input type="text" id="sceneFolder" readonly placeholder="Scene..."/><button class="btn btn-blue" onclick="document.getElementById('sceneFolderInput').click()">Chọn</button><input type="file" id="sceneFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('scene',this)"/></div></div>
+        <div class="field-row"><label>Style</label><div class="input-btn-row"><input type="text" id="styleFolder" readonly placeholder="Style..."/><button class="btn btn-blue" onclick="document.getElementById('styleFolderInput').click()">Chọn</button><input type="file" id="styleFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('style',this)"/></div></div>
       </div>
     </div>
 
-    <!-- FOLDER STRUCTURE CARD -->
     <div class="card" id="folderStructureCard" style="display:none">
       <div class="card-title">📁 Folder Structure Mode</div>
-      <p class="card-desc">Chọn folder cha chứa các file .txt và folder ảnh cùng tên.</p>
       <div class="field-row">
         <label>Folder cha</label>
         <div class="input-btn-row">
@@ -157,25 +139,14 @@
       </table>
     </div>
 
-    <!-- REF IMAGE DIR CARD -->
-    <div class="card" id="refDirCard">
-      <div class="card-title">🖼️ Thư mục ảnh tham chiếu (tùy chọn)</div>
-      <div class="input-btn-row">
-        <input type="text" id="refDirPath" readonly placeholder="Chọn thư mục chứa ảnh tham chiếu…"/>
-        <button class="btn btn-blue" onclick="document.getElementById('refDirInput').click()">Chọn</button>
-        <input type="file" id="refDirInput" webkitdirectory style="display:none" onchange="loadRefDir(this)"/>
-      </div>
-      <div id="refImgPreview" class="ref-preview"></div>
-    </div>
+    <!-- Ref image UI moved to results table toolbar -->
 
-    <!-- ACTION BUTTONS -->
     <div class="action-buttons">
       <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ CHẠY NGAY</button>
       <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>⏸ TẠM DỪNG</button>
       <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
     </div>
 
-    <!-- PROGRESS -->
     <div class="card" id="progressCard" style="display:none">
       <div class="progress-header">
         <span id="progressLabel">Đang chạy...</span>
@@ -184,27 +155,93 @@
       <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
       <div class="progress-text" id="progressText">0 / 0 ảnh (0%)</div>
     </div>
-
     <div id="errorMsg" class="error-msg" style="display:none"></div>
   </div>
 
-  <!-- RIGHT PANEL: Results grid -->
+  <!-- RIGHT PANEL: Results Table -->
   <div class="right-panel">
     <div class="results-header">
-      <h2>Kết quả <span id="statusBadge"></span></h2>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="downloadAll()">⬇ Tải tất cả</button>
+      <h2>Kết quả <span id="statusBadge"></span> <span id="promptCountBadge" class="badge badge-pending" style="display:none"></span></h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="importRefAll()">📷 Import ảnh tất cả</button>
+        <button class="btn btn-ghost" onclick="clearRefAll()">🗑 Xóa ảnh tất cả</button>
+        <button class="btn btn-ghost" onclick="downloadAll()">⬇ Tải tất cả (ZIP)</button>
         <button class="btn btn-ghost" onclick="clearResults()">🗑 Xóa</button>
       </div>
+      <input type="file" id="refBulkInput" multiple accept="image/*" style="display:none" onchange="handleRefBulkImport(this)"/>
+      <input type="file" id="refRowInput" multiple accept="image/*" style="display:none" onchange="handleRefRowImport(this)"/>
     </div>
-    <div id="resultsGrid" class="results-grid">
-      <div class="empty-state">
+    <div class="results-table-wrap" id="resultsTableWrap">
+      <table class="results-table" id="resultsTable">
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th class="col-prompt">Prompt</th>
+            <th style="width:80px">Ảnh Ref</th>
+            <th style="width:100px">Trạng thái</th>
+            <th style="width:140px">Ảnh kết quả</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+      <div id="resultsEmpty" class="empty-state">
         <div class="empty-icon">🖼️</div>
-        <div>Ảnh sẽ hiển thị ở đây sau khi tạo xong</div>
+        <div>Chọn file .txt rồi nhấn CHẠY NGAY</div>
       </div>
     </div>
   </div>
 </div>
+</div>
+
+<!-- ═══ TAB: HISTORY ═══ -->
+<div id="tabHistory" class="tab-content" style="display:none">
+  <div class="history-container">
+    <div class="history-header">
+      <h2>📜 Lịch sử tạo ảnh</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-blue" onclick="loadHistory()">🔄 Làm mới</button>
+        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">⬇ Tải tất cả (ZIP)</button>
+        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">⬇ Tải đã chọn</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="historySelectAll" onchange="historyToggleAll(this.checked)"/> Chọn tất cả</label>
+      </div>
+    </div>
+    <div id="historyGrid" class="results-grid">
+      <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+    </div>
+    <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px">
+      <button class="btn btn-ghost" id="historyPrev" onclick="historyPrevPage()" disabled>← Trước</button>
+      <span id="historyPageInfo" style="font-size:0.82rem;color:var(--muted)">Trang 1</span>
+      <button class="btn btn-ghost" id="historyNext" onclick="historyNextPage()" disabled>Sau →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TAB: ADMIN ═══ -->
+<div id="tabAdmin" class="tab-content" style="display:none">
+  <div class="admin-container">
+    <h2>👑 Quản lý người dùng</h2>
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Thêm user mới</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+        <input type="text" id="adminNewUser" placeholder="Username" style="width:160px"/>
+        <input type="password" id="adminNewPass" placeholder="Password" style="width:160px"/>
+        <select id="adminNewRole" style="width:120px"><option value="user">User</option><option value="admin">Admin</option></select>
+        <button class="btn btn-green" onclick="adminAddUser()">➕ Thêm</button>
+      </div>
+    </div>
+    <table class="cookie-table" style="margin-top:12px" id="adminUserTable">
+      <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Trạng thái</th><th>Ngày tạo</th><th>Hành động</th></tr></thead>
+      <tbody id="adminUserBody"></tbody>
+    </table>
+
+    <h2 style="margin-top:24px">📜 Lịch sử toàn bộ</h2>
+    <div id="adminHistoryGrid" class="results-grid" style="margin-top:12px">
+      <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /appScreen -->
 
 <!-- COOKIE MODAL -->
 <div class="modal-overlay" id="cookieModal" style="display:none" onclick="closeCookieModalOutside(event)">
@@ -219,13 +256,11 @@
         <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
         <input type="file" id="cookieTxtImport" accept=".txt" style="display:none" onchange="loadCookieTxt(this)"/>
       </div>
-
       <div class="cookie-help">
         <strong>Cách lấy cookie:</strong> Cài
         <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank">Cookie Editor</a>
         → vào <a href="https://labs.google" target="_blank">labs.google</a> → đăng nhập → Export → Copy
       </div>
-
       <div class="field-row" style="margin-top:12px">
         <label>Thêm cookie mới</label>
         <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>
@@ -235,14 +270,13 @@
         <button class="btn btn-blue" onclick="testCookie()">🔍 Test cookie</button>
       </div>
       <div id="cookieTestResult" style="margin-top:8px;font-size:0.82rem"></div>
-
       <table class="cookie-table" id="cookieTable" style="margin-top:12px">
         <thead><tr><th>#</th><th>Cookie (hash)</th><th>Email</th><th>Trạng thái</th><th></th></tr></thead>
         <tbody id="cookieTableBody"></tbody>
       </table>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="saveCookies()">💾 Lưu & Đóng</button>
+      <button class="btn btn-primary" onclick="closeCookieModal()">💾 Đóng</button>
     </div>
   </div>
 </div>

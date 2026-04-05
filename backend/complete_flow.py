@@ -5085,8 +5085,13 @@ class LabsFlowClient:
                 # Extract media ID from response
                 media_id = None
                 if isinstance(result, dict):
-                    # Try direct mediaId first
-                    media_id = result.get("mediaId")
+                    # Try media.name (new response format)
+                    media_obj = result.get("media")
+                    if isinstance(media_obj, dict):
+                        media_id = media_obj.get("name")
+                    if not media_id:
+                        # Try direct mediaId
+                        media_id = result.get("mediaId")
                     if not media_id:
                         # Try mediaGenerationId structure
                         media_gen = result.get("mediaGenerationId", {})
@@ -6352,10 +6357,14 @@ class LabsFlowClient:
         client_context["sessionId"] = common_session_id
         
         # ✅ Đảm bảo tất cả requests có cùng sessionId với top-level (theo curl example)
-        # ✅ Đồng thời convert recaptchaToken → recaptchaContext cho mỗi request
+        # ✅ Đồng bộ sessionId + recaptchaContext vào mỗi request (theo curl thật)
         for req in requests_payload:
             if "clientContext" in req and isinstance(req["clientContext"], dict):
                 req["clientContext"]["sessionId"] = common_session_id
+                # ✅ FIX: Copy recaptchaContext từ top-level vào request con (curl thật có ở cả 2 nơi)
+                rc = client_context.get("recaptchaContext")
+                if rc:
+                    req["clientContext"]["recaptchaContext"] = dict(rc)
                 self._convert_to_recaptcha_context(req["clientContext"])
 
         # ✅ Thêm useNewMedia và mediaGenerationContext theo API format thực tế
@@ -6415,6 +6424,13 @@ class LabsFlowClient:
                     return None
                 # ✅ Convert lại format nếu token mới được inject
                 self._convert_to_recaptcha_context(payload["clientContext"])
+                
+                # ✅ FIX: Sync recaptchaContext mới vào requests con (theo curl thật)
+                rc = payload["clientContext"].get("recaptchaContext")
+                if rc:
+                    for req in payload.get("requests", []):
+                        if "clientContext" in req and isinstance(req["clientContext"], dict):
+                            req["clientContext"]["recaptchaContext"] = dict(rc)
                 
                 # ✅ LOG HEADERS VÀ PAYLOAD CHI TIẾT - FULL (KHÔNG TRUNCATE)
                 request_headers = self._aisandbox_headers()

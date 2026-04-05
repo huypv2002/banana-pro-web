@@ -1,0 +1,8 @@
+name = "banana-pro-api"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "banana-pro-db"
+database_id = "cd5c724a-6f42-4325-9511-9e7a5aa76ea6"

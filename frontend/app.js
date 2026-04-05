@@ -1,416 +1,751 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let cookies = JSON.parse(localStorage.getItem('bp_cookies') || '[]');
-let currentMode = 'normal';
+// ── Auth State ────────────────────────────────────────────────────────────────
+let authToken = localStorage.getItem("bp_token") || "";
+let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
+let authTab = "login";
+
+// ── App State ─────────────────────────────────────────────────────────────────
+let cookies = [];
+let currentMode = "normal";
 let currentJobId = null;
 let pollInterval = null;
 let paused = false;
-
-// Prompt sources
-let batchFiles = [];        // [{name, prompts}]
-let refImages = {};         // {subject:[b64], scene:[b64], style:[b64]}
-let refDirImages = [];      // [b64] from ref dir
-let folderStructure = {};   // {folderName: {prompts:[], images:[b64]}}
+let batchFiles = [];
+let refImages = {};
+let refDirImages = [];
+let folderStructure = {};
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-renderCookieTable();
-updateUserInfo();
+(async function init() {
+  if (authToken && authUser) {
+    try {
+      const res = await apiFetch("/auth/me");
+      if (res.ok) {
+        const data = await res.json();
+        authUser = data;
+        localStorage.setItem("bp_user", JSON.stringify(data));
+        showApp();
+        return;
+      }
+    } catch (e) {}
+    // Token expired
+    clearAuth();
+  }
+  showLogin();
+})();
 
-// ── Cookie Management ─────────────────────────────────────────────────────────
-function openCookieModal() { document.getElementById('cookieModal').style.display = 'flex'; }
-function closeCookieModal() { document.getElementById('cookieModal').style.display = 'none'; }
-function closeCookieModalOutside(e) { if (e.target.id === 'cookieModal') closeCookieModal(); }
+// ── API Helper ────────────────────────────────────────────────────────────────
+function apiFetch(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (authToken) headers["Authorization"] = "Bearer " + authToken;
+  return fetch(API_BASE + path, { ...opts, headers });
+}
 
-function addCookie() {
-  const raw = document.getElementById('newCookieInput').value.trim();
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function showLogin() {
+  document.getElementById("loginScreen").style.display = "flex";
+  document.getElementById("appScreen").style.display = "none";
+}
+
+function showApp() {
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("appScreen").style.display = "block";
+  document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
+  document.getElementById("navAdmin").style.display = authUser.role === "admin" ? "" : "none";
+  loadCookiesFromDB();
+}
+
+function switchAuthTab(tab) {
+  authTab = tab;
+  document.querySelectorAll(".login-tab").forEach(b => b.classList.remove("active"));
+  document.querySelector(`.login-tab:nth-child(${tab === "login" ? 1 : 2})`).classList.add("active");
+  document.getElementById("authSubmitBtn").textContent = tab === "login" ? "Đăng nhập" : "Đăng ký";
+}
+
+async function handleAuth(e) {
+  e.preventDefault();
+  const username = document.getElementById("authUsername").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const errEl = document.getElementById("authError");
+  errEl.style.display = "none";
+  const endpoint = authTab === "login" ? "/auth/login" : "/auth/register";
+  try {
+    const res = await fetch(API_BASE + endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || "Lỗi"; errEl.style.display = "block"; return false; }
+    authToken = data.token;
+    authUser = { username: data.username, role: data.role };
+    localStorage.setItem("bp_token", authToken);
+    localStorage.setItem("bp_user", JSON.stringify(authUser));
+    showApp();
+  } catch (e) {
+    errEl.textContent = "Lỗi kết nối: " + e.message;
+    errEl.style.display = "block";
+  }
+  return false;
+}
+
+async function handleLogout() {
+  await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
+  clearAuth();
+  showLogin();
+}
+
+function clearAuth() {
+  authToken = "";
+  authUser = null;
+  localStorage.removeItem("bp_token");
+  localStorage.removeItem("bp_user");
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(tab) {
+  ["Generate", "History", "Admin"].forEach(t => {
+    document.getElementById("tab" + t).style.display = t.toLowerCase() === tab ? "" : "none";
+    const nav = document.getElementById("nav" + t);
+    if (nav) nav.classList.toggle("active", t.toLowerCase() === tab);
+  });
+  if (tab === "history") loadHistory();
+  if (tab === "admin" && authUser?.role === "admin") { loadAdminUsers(); loadAdminHistory(); }
+}
+
+// ── Cookie Management (D1) ───────────────────────────────────────────────────
+function openCookieModal() { document.getElementById("cookieModal").style.display = "flex"; }
+function closeCookieModal() { document.getElementById("cookieModal").style.display = "none"; }
+function closeCookieModalOutside(e) { if (e.target.id === "cookieModal") closeCookieModal(); }
+
+async function loadCookiesFromDB() {
+  try {
+    const res = await apiFetch("/user/cookies");
+    if (res.ok) cookies = await res.json();
+    renderCookieTable();
+  } catch (e) {}
+}
+
+async function addCookie() {
+  const raw = document.getElementById("newCookieInput").value.trim();
   if (!raw) return;
   const parsed = parseCookieInput(raw);
-  if (!parsed || !Object.keys(parsed).length) { alert('Cookie không hợp lệ'); return; }
+  if (!parsed || !Object.keys(parsed).length) { alert("Cookie không hợp lệ"); return; }
   const hash = cookieHash(parsed);
-  if (cookies.find(c => c.hash === hash)) { alert('Cookie này đã tồn tại'); return; }
-  cookies.push({ raw, hash, email: '', status: 'pending' });
-  saveCookies();
-  renderCookieTable();
-  document.getElementById('newCookieInput').value = '';
+  const res = await apiFetch("/user/cookies", {
+    method: "POST",
+    body: JSON.stringify({ cookie_raw: raw, cookie_hash: hash }),
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || "Lỗi"); return; }
+  document.getElementById("newCookieInput").value = "";
+  loadCookiesFromDB();
 }
 
 async function testCookie() {
-  const raw = document.getElementById('newCookieInput').value.trim();
+  const raw = document.getElementById("newCookieInput").value.trim();
   if (!raw) return;
-  const el = document.getElementById('cookieTestResult');
-  el.textContent = '⏳ Đang test...';
+  const el = document.getElementById("cookieTestResult");
+  el.textContent = "⏳ Đang test...";
   try {
-    const res = await fetch(`${API_BASE}/test-cookie`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ cookie: raw })
+    const res = await apiFetch("/test-cookie", {
+      method: "POST",
+      body: JSON.stringify({ cookie: raw }),
     });
     const data = await res.json();
-    if (data.ok) {
-      el.innerHTML = `<span class="status-ok">✅ Hợp lệ - ${data.email || ''} (hết hạn: ${data.expires || 'N/A'})</span>`;
-    } else {
-      el.innerHTML = `<span class="status-err">❌ ${data.error || 'Cookie không hợp lệ'}</span>`;
-    }
-  } catch(e) {
-    el.innerHTML = `<span class="status-err">❌ Lỗi kết nối: ${e.message}</span>`;
+    el.innerHTML = data.ok
+      ? `<span class="status-ok">✅ Hợp lệ - ${data.email || ""}</span>`
+      : `<span class="status-err">❌ ${data.error || "Không hợp lệ"}</span>`;
+  } catch (e) {
+    el.innerHTML = `<span class="status-err">❌ ${e.message}</span>`;
   }
 }
 
-function deleteCookie(idx) {
-  cookies.splice(idx, 1);
-  saveCookies();
-  renderCookieTable();
+async function deleteCookie(id) {
+  await apiFetch(`/user/cookies/${id}`, { method: "DELETE" });
+  loadCookiesFromDB();
 }
 
-function clearAllCookies() {
-  if (!confirm('Xóa tất cả cookie?')) return;
-  cookies = [];
-  saveCookies();
-  renderCookieTable();
+async function clearAllCookies() {
+  if (!confirm("Xóa tất cả cookie?")) return;
+  await apiFetch("/user/cookies/clear", { method: "DELETE" });
+  loadCookiesFromDB();
 }
 
-function importCookieTxt() { document.getElementById('cookieTxtImport').click(); }
+function importCookieTxt() { document.getElementById("cookieTxtImport").click(); }
 function loadCookieTxt(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
-    const lines = e.target.result.split('\n').map(s => s.trim()).filter(Boolean);
+  reader.onload = async (e) => {
+    const lines = e.target.result.split("\n").map(s => s.trim()).filter(Boolean);
     let added = 0;
-    lines.forEach(line => {
+    for (const line of lines) {
       const parsed = parseCookieInput(line);
-      if (!parsed || !Object.keys(parsed).length) return;
+      if (!parsed || !Object.keys(parsed).length) continue;
       const hash = cookieHash(parsed);
-      if (!cookies.find(c => c.hash === hash)) {
-        cookies.push({ raw: line, hash, email: '', status: 'pending' });
-        added++;
-      }
-    });
-    saveCookies();
-    renderCookieTable();
+      const res = await apiFetch("/user/cookies", {
+        method: "POST",
+        body: JSON.stringify({ cookie_raw: line, cookie_hash: hash }),
+      });
+      if (res.ok) added++;
+    }
+    loadCookiesFromDB();
     alert(`Đã thêm ${added} cookie`);
   };
   reader.readAsText(file);
 }
 
-function saveCookies() {
-  localStorage.setItem('bp_cookies', JSON.stringify(cookies));
-  closeCookieModal();
-  updateUserInfo();
-}
-
 function renderCookieTable() {
-  const tbody = document.getElementById('cookieTableBody');
+  const tbody = document.getElementById("cookieTableBody");
   if (!tbody) return;
   tbody.innerHTML = cookies.map((c, i) => `
     <tr>
-      <td>${i+1}</td>
-      <td style="font-family:monospace;font-size:0.75rem">${c.hash.slice(0,12)}...</td>
-      <td>${c.email || '-'}</td>
-      <td><span class="status-${c.status === 'ok' ? 'ok' : c.status === 'error' ? 'err' : 'pending'}">${c.status === 'ok' ? '✅ OK' : c.status === 'error' ? '❌ Lỗi' : '⏳ Chưa test'}</span></td>
-      <td><button class="btn btn-red" style="padding:3px 8px;font-size:0.72rem" onclick="deleteCookie(${i})">Xóa</button></td>
-    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:#6b7280;padding:16px">Chưa có cookie nào</td></tr>';
-}
-
-function updateUserInfo() {
-  const el = document.getElementById('userInfo');
-  if (el) el.textContent = cookies.length ? `🍪 ${cookies.length} cookie` : '';
+      <td>${i + 1}</td>
+      <td style="font-family:monospace;font-size:0.75rem">${(c.cookie_hash || "").slice(0, 12)}...</td>
+      <td>${c.email || "-"}</td>
+      <td><span class="status-${c.status === "ok" ? "ok" : c.status === "error" ? "err" : "pending"}">${c.status === "ok" ? "✅ OK" : c.status === "error" ? "❌ Lỗi" : "⏳"}</span></td>
+      <td><button class="btn btn-red" style="padding:3px 8px;font-size:0.72rem" onclick="deleteCookie(${c.id})">Xóa</button></td>
+    </tr>`).join("") || '<tr><td colspan="5" style="text-align:center;color:#6b7280;padding:16px">Chưa có cookie</td></tr>';
 }
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   currentMode = mode;
-  document.getElementById('multipleCard').style.display = mode === 'multiple' ? 'block' : 'none';
-  document.getElementById('folderStructureCard').style.display = mode === 'folder' ? 'block' : 'none';
-  document.getElementById('refDirCard').style.display = mode === 'normal' ? 'block' : 'none';
-  document.getElementById('promptSourceCard').style.display = mode !== 'folder' ? 'block' : 'none';
+  document.getElementById("multipleCard").style.display = mode === "multiple" ? "block" : "none";
+  document.getElementById("folderStructureCard").style.display = mode === "folder" ? "block" : "none";
+  document.getElementById("promptSourceCard").style.display = mode !== "folder" ? "block" : "none";
+  const refDir = document.getElementById("refDirCard");
+  if (refDir) refDir.style.display = mode === "normal" ? "block" : "none";
 }
 
 // ── Prompt Sources ────────────────────────────────────────────────────────────
 function loadTxtFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  document.getElementById('txtFilePath').value = file.name;
+  const file = input.files[0]; if (!file) return;
+  document.getElementById("txtFilePath").value = file.name;
   const reader = new FileReader();
   reader.onload = e => {
-    const prompts = e.target.result.split('\n').map(s => s.trim()).filter(Boolean);
-    // Remove existing entry with same name
+    const prompts = e.target.result.split("\n").map(s => s.trim()).filter(Boolean);
     batchFiles = batchFiles.filter(f => f.name !== file.name);
-    batchFiles.push({ name: file.name, prompts, status: '⏳ Chờ' });
+    batchFiles.push({ name: file.name, prompts, status: "⏳ Chờ" });
     renderBatchTable();
   };
   reader.readAsText(file);
 }
 
 function loadFolderTxt(input) {
-  const files = Array.from(input.files).filter(f => f.name.endsWith('.txt'));
+  const files = Array.from(input.files).filter(f => f.name.endsWith(".txt"));
   if (!files.length) return;
-  document.getElementById('folderTxtPath').value = input.files[0].webkitRelativePath.split('/')[0];
+  document.getElementById("folderTxtPath").value = input.files[0].webkitRelativePath.split("/")[0];
   let loaded = 0;
   files.forEach(file => {
     const reader = new FileReader();
     reader.onload = e => {
-      const prompts = e.target.result.split('\n').map(s => s.trim()).filter(Boolean);
+      const prompts = e.target.result.split("\n").map(s => s.trim()).filter(Boolean);
       batchFiles = batchFiles.filter(f => f.name !== file.name);
-      batchFiles.push({ name: file.name, prompts, status: '⏳ Chờ' });
-      loaded++;
-      if (loaded === files.length) renderBatchTable();
+      batchFiles.push({ name: file.name, prompts, status: "⏳ Chờ" });
+      if (++loaded === files.length) renderBatchTable();
     };
     reader.readAsText(file);
   });
 }
 
-function clearSources() {
-  batchFiles = [];
-  document.getElementById('txtFilePath').value = '';
-  document.getElementById('folderTxtPath').value = '';
-  renderBatchTable();
-}
+function clearSources() { batchFiles = []; document.getElementById("txtFilePath").value = ""; document.getElementById("folderTxtPath").value = ""; renderBatchTable(); }
 
 function renderBatchTable() {
-  const tbody = document.getElementById('batchTableBody');
-  tbody.innerHTML = batchFiles.map((f, i) => `
-    <tr onclick="selectBatchRow(${i})" id="batchRow${i}">
-      <td>${i+1}</td>
-      <td>${esc(f.name)}</td>
-      <td>${f.prompts.length}</td>
-      <td>${f.status}</td>
-    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file nào</td></tr>';
+  const tbody = document.getElementById("batchTableBody");
+  tbody.innerHTML = batchFiles.map((f, i) => `<tr id="batchRow${i}"><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("") || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr>';
+  // Auto-populate results table when files loaded (only if no active job)
+  if (!currentJobId) populateResultsTable();
 }
 
-function selectBatchRow(i) {
-  document.querySelectorAll('.batch-table tr').forEach(r => r.classList.remove('active-row'));
-  const row = document.getElementById(`batchRow${i}`);
-  if (row) row.classList.add('active-row');
-}
+// ── Ref Images (per-row + bulk) ───────────────────────────────────────────────
+let rowRefImages = {}; // {rowIndex: [base64...]}
+let refImportTargetRow = -1;
 
-// ── Ref Folders (Multiple-to-Image) ──────────────────────────────────────────
 function setRefFolder(type, input) {
   const files = Array.from(input.files).filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name));
-  document.getElementById(`${type}Folder`).value = files.length ? input.files[0].webkitRelativePath.split('/')[0] : '';
+  document.getElementById(`${type}Folder`).value = files.length ? input.files[0].webkitRelativePath.split("/")[0] : "";
   refImages[type] = [];
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => refImages[type].push(e.target.result);
-    reader.readAsDataURL(file);
+  files.forEach(file => { const r = new FileReader(); r.onload = e => refImages[type].push(e.target.result); r.readAsDataURL(file); });
+}
+
+function importRefAll() {
+  refImportTargetRow = -1;
+  document.getElementById("refBulkInput").click();
+}
+function importRefForRow(idx) {
+  refImportTargetRow = idx;
+  document.getElementById("refRowInput").click();
+}
+function handleRefBulkImport(input) {
+  const files = Array.from(input.files); if (!files.length) return;
+  const total = batchFiles.flatMap(f => f.prompts).length;
+  let loaded = 0; const imgs = [];
+  files.forEach(file => { const r = new FileReader(); r.onload = e => { imgs.push(e.target.result); if (++loaded === files.length) { for (let i = 0; i < total; i++) { if (!rowRefImages[i]) rowRefImages[i] = []; rowRefImages[i].push(...imgs); } refreshRefCells(); } }; r.readAsDataURL(file); });
+  input.value = "";
+}
+function handleRefRowImport(input) {
+  const files = Array.from(input.files); if (!files.length) return;
+  const idx = refImportTargetRow; let loaded = 0;
+  files.forEach(file => { const r = new FileReader(); r.onload = e => { if (!rowRefImages[idx]) rowRefImages[idx] = []; rowRefImages[idx].push(e.target.result); if (++loaded === files.length) refreshRefCells(); }; r.readAsDataURL(file); });
+  input.value = "";
+}
+function clearRefAll() { rowRefImages = {}; refreshRefCells(); }
+function refreshRefCells() {
+  batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
+    const row = document.getElementById(`resRow${i}`); if (!row) return;
+    const imgs = rowRefImages[i] || [];
+    row.cells[2].innerHTML = imgs.length
+      ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
+      : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
   });
 }
 
-// ── Ref Dir ───────────────────────────────────────────────────────────────────
-function loadRefDir(input) {
-  const files = Array.from(input.files).filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name));
-  document.getElementById('refDirPath').value = files.length ? input.files[0].webkitRelativePath.split('/')[0] : '';
-  refDirImages = [];
-  const preview = document.getElementById('refImgPreview');
-  preview.innerHTML = '';
-  files.slice(0, 10).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      refDirImages.push(e.target.result);
-      const img = document.createElement('img');
-      img.src = e.target.result;
-      preview.appendChild(img);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-// ── Folder Structure ──────────────────────────────────────────────────────────
 function loadParentFolder(input) {
-  const files = Array.from(input.files);
-  folderStructure = {};
+  const files = Array.from(input.files); folderStructure = {};
   files.forEach(file => {
-    const parts = file.webkitRelativePath.split('/');
-    if (parts.length < 2) return;
-    const subFolder = parts[1];
-    if (!folderStructure[subFolder]) folderStructure[subFolder] = { prompts: [], images: [] };
-    if (file.name.endsWith('.txt')) {
-      const reader = new FileReader();
-      reader.onload = e => {
-        folderStructure[subFolder].prompts.push(...e.target.result.split('\n').map(s => s.trim()).filter(Boolean));
-        renderFolderStructureTable();
-      };
-      reader.readAsText(file);
-    } else if (/\.(jpg|jpeg|png|webp|gif)$/i.test(file.name)) {
-      const reader = new FileReader();
-      reader.onload = e => { folderStructure[subFolder].images.push(e.target.result); };
-      reader.readAsDataURL(file);
-    }
+    const parts = file.webkitRelativePath.split("/"); if (parts.length < 2) return;
+    const sub = parts[1]; if (!folderStructure[sub]) folderStructure[sub] = { prompts: [], images: [] };
+    if (file.name.endsWith(".txt")) { const r = new FileReader(); r.onload = e => { folderStructure[sub].prompts.push(...e.target.result.split("\n").map(s => s.trim()).filter(Boolean)); renderFolderStructureTable(); }; r.readAsText(file); }
+    else if (/\.(jpg|jpeg|png|webp|gif)$/i.test(file.name)) { const r = new FileReader(); r.onload = e => folderStructure[sub].images.push(e.target.result); r.readAsDataURL(file); }
   });
-  document.getElementById('parentFolder').value = files[0]?.webkitRelativePath.split('/')[0] || '';
+  document.getElementById("parentFolder").value = files[0]?.webkitRelativePath.split("/")[0] || "";
 }
 
 function renderFolderStructureTable() {
-  const tbody = document.getElementById('folderStructureBody');
+  const tbody = document.getElementById("folderStructureBody");
   const entries = Object.entries(folderStructure);
-  tbody.innerHTML = entries.map(([name, data], i) => `
-    <tr><td>${i+1}</td><td>${esc(name)}</td><td>${data.images.length}</td><td>${data.prompts.length}</td></tr>
-  `).join('') || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có folder nào</td></tr>';
+  tbody.innerHTML = entries.map(([name, data], i) => `<tr><td>${i + 1}</td><td>${esc(name)}</td><td>${data.images.length}</td><td>${data.prompts.length}</td></tr>`).join("") || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có folder</td></tr>';
 }
 
 // ── Generate ──────────────────────────────────────────────────────────────────
 async function startGeneration() {
-  if (!cookies.length) { showError('Vui lòng thêm cookie trong mục Quản lý Cookie.'); return; }
+  if (!cookies.length) { showError("Vui lòng thêm cookie trong mục Quản lý Cookie."); return; }
 
-  let prompts = [];
-  let reference_images = [];
-  let folder_images = {};
-
-  if (currentMode === 'normal' || currentMode === 'multiple') {
+  let prompts = [], reference_images = [], folder_images = {};
+  if (currentMode === "normal" || currentMode === "multiple") {
     prompts = batchFiles.flatMap(f => f.prompts);
-    if (!prompts.length) { showError('Vui lòng chọn file .txt có prompts.'); return; }
-    if (currentMode === 'multiple') {
-      reference_images = [...(refImages.subject||[]), ...(refImages.scene||[]), ...(refImages.style||[])];
-    } else {
-      reference_images = refDirImages;
-    }
-  } else if (currentMode === 'folder') {
+    if (!prompts.length) { showError("Vui lòng chọn file .txt có prompts."); return; }
+    reference_images = currentMode === "multiple" ? [...(refImages.subject || []), ...(refImages.scene || []), ...(refImages.style || [])] : Object.values(rowRefImages).flat();
+  } else if (currentMode === "folder") {
     const entries = Object.entries(folderStructure);
-    if (!entries.length) { showError('Vui lòng chọn folder cha.'); return; }
-    entries.forEach(([name, data]) => {
-      prompts.push(...data.prompts);
-      if (data.images.length) folder_images[name.toLowerCase()] = data.images;
-    });
-    if (!prompts.length) { showError('Không tìm thấy prompt nào.'); return; }
+    if (!entries.length) { showError("Vui lòng chọn folder cha."); return; }
+    entries.forEach(([name, data]) => { prompts.push(...data.prompts); if (data.images.length) folder_images[name.toLowerCase()] = data.images; });
+    if (!prompts.length) { showError("Không tìm thấy prompt nào."); return; }
   }
 
-  const model = document.getElementById('modelSelect').value;
-  const aspect_ratio = document.getElementById('aspectSelect').value;
-  const variants = parseInt(document.getElementById('variantsInput').value) || 1;
+  const model = document.getElementById("modelSelect").value;
+  const aspect_ratio = document.getElementById("aspectSelect").value;
+  const variants = parseInt(document.getElementById("variantsInput").value) || 1;
 
-  hideError();
-  setLoading(true);
-  clearResults();
-  paused = false;
+  // Get first cookie raw from DB
+  let cookieRaw = "";
+  try {
+    const res = await apiFetch("/user/cookies");
+    if (res.ok) {
+      const list = await res.json();
+      if (list.length) {
+        // Need to get raw - fetch from a dedicated endpoint or use stored
+        // We'll pass cookie_id and let worker handle it
+      }
+    }
+  } catch (e) {}
+
+  // For now, we need the raw cookie - get it from the first cookie
+  // The cookie_raw is stored in D1, we need a way to get it
+  // Let's add a special generate endpoint that reads cookie from DB
+  hideError(); setLoading(true); populateResultsTable(); paused = false;
 
   try {
-    const body = { cookie: cookies[0].raw, prompts, model, aspect_ratio, variants };
+    const body = { prompts, model, aspect_ratio, variants };
     if (reference_images.length) body.reference_images = reference_images;
     if (Object.keys(folder_images).length) body.folder_images = folder_images;
 
-    const res = await fetch(`${API_BASE}/generate`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.detail || `HTTP ${res.status}`); }
+    const res = await apiFetch("/generate", { method: "POST", body: JSON.stringify(body) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
     currentJobId = job.job_id;
     updateProgress(job);
-    startPolling();
-  } catch(e) {
-    showError('Lỗi: ' + e.message);
+    startPolling(model);
+  } catch (e) {
+    showError("Lỗi: " + e.message);
     setLoading(false);
   }
 }
 
-function startPolling() {
+function startPolling(model) {
   pollInterval = setInterval(async () => {
     if (!currentJobId || paused) return;
     try {
-      const res = await fetch(`${API_BASE}/jobs/${currentJobId}`);
+      const res = await apiFetch(`/jobs/${currentJobId}`);
       if (!res.ok) return;
       const job = await res.json();
       updateProgress(job);
-      renderImages(job.images);
-      // Update batch table status
-      if (job.status === 'running') {
-        batchFiles.forEach(f => { if (f.status === '⏳ Chờ') f.status = '🔄 Đang chạy'; });
-        renderBatchTable();
-      }
-      if (job.status === 'done' || job.status === 'error') {
+      updateResultsFromJob(job);
+      if (job.status === "running") { batchFiles.forEach(f => { if (f.status === "⏳ Chờ") f.status = "🔄 Đang chạy"; }); renderBatchTable(); }
+      if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval);
         setLoading(false);
-        batchFiles.forEach(f => f.status = job.status === 'done' ? '✅ Xong' : '❌ Lỗi');
+        batchFiles.forEach(f => f.status = job.status === "done" ? "✅ Xong" : "❌ Lỗi");
         renderBatchTable();
-        if (job.status === 'error') showError(job.error || 'Có lỗi xảy ra.');
+        if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
+        // Save history to D1
+        if (job.images?.length) {
+          const items = job.images.map(img => ({
+            job_id: currentJobId, prompt: img.prompt, model: model || "",
+            image_url: img.url || null, error: img.error || null,
+          }));
+          apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items }) }).catch(() => {});
+        }
       }
-    } catch(e) {}
+    } catch (e) {}
   }, 2000);
 }
 
-function togglePause() {
-  paused = !paused;
-  document.getElementById('pauseBtn').textContent = paused ? '▶ TIẾP TỤC' : '⏸ TẠM DỪNG';
-}
+function togglePause() { paused = !paused; document.getElementById("pauseBtn").textContent = paused ? "▶ TIẾP TỤC" : "⏸ TẠM DỪNG"; }
 
 async function stopGeneration() {
   if (!currentJobId) return;
   clearInterval(pollInterval);
-  await fetch(`${API_BASE}/jobs/${currentJobId}`, { method: 'DELETE' }).catch(()=>{});
+  await apiFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
   setLoading(false);
-  document.getElementById('progressText').textContent = 'Đã dừng.';
-  batchFiles.forEach(f => { if (f.status === '🔄 Đang chạy') f.status = '⏹ Dừng'; });
+  document.getElementById("progressText").textContent = "Đã dừng.";
+  batchFiles.forEach(f => { if (f.status === "🔄 Đang chạy") f.status = "⏹ Dừng"; });
   renderBatchTable();
 }
 
-// ── UI Helpers ────────────────────────────────────────────────────────────────
-function setLoading(on) {
-  document.getElementById('runBtn').disabled = on;
-  document.getElementById('pauseBtn').disabled = !on;
-  document.getElementById('stopBtn').disabled = !on;
-  document.getElementById('progressCard').style.display = on ? 'block' : 'none';
+// ── History ───────────────────────────────────────────────────────────────────
+let historyPage = 0;
+let historyLoading = false;
+const HISTORY_LIMIT = 50;
+
+async function loadHistory() {
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
+  await fetchHistoryPage(false);
 }
 
-function updateProgress(job) {
-  const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
-  document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressText').textContent = `${job.completed} / ${job.total} ảnh (${pct}%)`;
-  const badge = document.getElementById('progressBadge');
-  const labels = { pending:'Chờ', running:'Đang chạy', done:'Hoàn thành', error:'Lỗi' };
-  badge.className = `badge badge-${job.status}`;
-  badge.textContent = labels[job.status] || job.status;
-  const sb = document.getElementById('statusBadge');
-  sb.className = `badge badge-${job.status}`;
-  sb.textContent = labels[job.status] || job.status;
+async function fetchHistoryPage(append) {
+  if (historyLoading) return;
+  historyLoading = true;
+  const grid = document.getElementById("historyGrid");
+  const prevBtn = document.getElementById("historyPrev");
+  const nextBtn = document.getElementById("historyNext");
+  const pageInfo = document.getElementById("historyPageInfo");
+
+  if (!append) grid.innerHTML = '<div class="empty-state">⏳ Đang tải...</div>';
+
+  try {
+    const offset = historyPage * HISTORY_LIMIT;
+    const res = await apiFetch(`/user/history?limit=${HISTORY_LIMIT}&offset=${offset}`);
+    if (!res.ok) throw new Error();
+    const items = await res.json();
+    renderHistoryGrid(items, grid, false);
+    prevBtn.disabled = historyPage === 0;
+    nextBtn.disabled = items.length < HISTORY_LIMIT;
+    pageInfo.textContent = `Trang ${historyPage + 1}`;
+  } catch (e) {
+    grid.innerHTML = '<div class="empty-state">❌ Lỗi tải lịch sử</div>';
+  } finally {
+    historyLoading = false;
+  }
 }
 
-function renderImages(images) {
-  if (!images?.length) return;
-  const grid = document.getElementById('resultsGrid');
-  grid.innerHTML = '';
-  images.forEach(img => {
-    const card = document.createElement('div');
-    card.className = 'img-card';
-    if (img.url) {
-      card.innerHTML = `
-        <img src="${img.url}" alt="${esc(img.prompt)}" loading="lazy" onerror="this.style.display='none'"/>
-        <div class="img-card-body"><div class="img-card-prompt">${esc(img.prompt)}</div></div>
+function historyPrevPage() {
+  if (historyPage > 0) { historyPage--; document.getElementById("historySelectAll").checked = false; fetchHistoryPage(false); }
+}
+
+function historyNextPage() {
+  historyPage++;
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage(false);
+}
+
+function renderHistoryGrid(items, grid, append) {
+  if (!append) grid.innerHTML = "";
+  if (!items.length && !append) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
+  items.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "img-card";
+    const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+    const cbHtml = item.image_url ? `<label class="hist-cb"><input type="checkbox" class="hist-select" data-url="${item.image_url}"/></label>` : "";
+    if (item.image_url) {
+      card.innerHTML = `${cbHtml}
+        <img src="${item.image_url}" alt="${esc(item.prompt)}" loading="lazy" onerror="this.style.display='none'"/>
+        <div class="img-card-body">
+          <div class="img-card-prompt">${esc(item.prompt)}</div>
+          <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model)} · ${time}</div>
+        </div>
         <div class="img-card-actions">
-          <a href="${img.url}" download target="_blank">⬇ Tải</a>
-          <a href="${img.url}" target="_blank">🔗 Mở</a>
+          <a href="${item.image_url}" target="_blank">🔗 Mở</a>
         </div>`;
     } else {
-      card.innerHTML = `<div class="img-card-error">❌ ${esc(img.error||'Thất bại')}</div><div class="img-card-body"><div class="img-card-prompt">${esc(img.prompt)}</div></div>`;
+      card.innerHTML = `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div>
+        <div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model)} · ${time}</div></div>`;
     }
     grid.appendChild(card);
   });
 }
 
+function historyToggleAll(checked) {
+  document.querySelectorAll("#historyGrid .hist-select").forEach(cb => cb.checked = checked);
+}
+
+function getHistoryUrls(selectedOnly) {
+  if (selectedOnly) return [...document.querySelectorAll("#historyGrid .hist-select:checked")].map(cb => cb.dataset.url);
+  return [...document.querySelectorAll("#historyGrid .hist-select")].map(cb => cb.dataset.url);
+}
+
+async function historyDownloadZip(urls, btnId) {
+  if (!urls.length) { alert("Không có ảnh để tải"); return; }
+  const btn = document.getElementById(btnId);
+  const origText = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Đang gom..."; }
+  try {
+    if (!window.JSZip) {
+      await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+    }
+    const zip = new JSZip(); let idx = 0;
+    for (const url of urls) {
+      try {
+        if (btn) btn.textContent = `⏳ ${idx + 1}/${urls.length}...`;
+        const resp = await fetch(url); const blob = await resp.blob();
+        const ext = blob.type?.includes("png") ? "png" : blob.type?.includes("webp") ? "webp" : "jpg";
+        zip.file(`image_${String(++idx).padStart(3, "0")}.${ext}`, blob);
+      } catch (e) { console.warn("Skip:", url, e); }
+    }
+    if (!idx) { alert("Không tải được ảnh nào"); return; }
+    if (btn) btn.textContent = "⏳ Nén ZIP...";
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(content);
+    a.download = `history_${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click(); URL.revokeObjectURL(a.href);
+  } catch (e) { alert("Lỗi tải ZIP: " + e.message); }
+  finally { if (btn) { btn.textContent = origText; btn.disabled = false; } }
+}
+
+function historyDownloadAll() { historyDownloadZip(getHistoryUrls(false), "histDlAll"); }
+function historyDownloadSelected() { historyDownloadZip(getHistoryUrls(true), "histDlSel"); }
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+async function loadAdminUsers() {
+  try {
+    const res = await apiFetch("/admin/users");
+    if (!res.ok) return;
+    const users = await res.json();
+    const tbody = document.getElementById("adminUserBody");
+    tbody.innerHTML = users.map(u => `<tr>
+      <td>${u.id}</td><td>${esc(u.username)}</td>
+      <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "admin" ? "disabled" : ""}>
+        <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
+        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+      </select></td>
+      <td>${u.disabled ? '<span class="status-err">Bị khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
+      <td>${u.created_at || ""}</td>
+      <td>
+        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓 Mở" : "🔒 Khóa"}</button>
+        ${u.username !== "admin" ? `<button class="btn btn-red" style="padding:3px 8px;font-size:0.72rem" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
+      </td>
+    </tr>`).join("");
+  } catch (e) {}
+}
+
+async function adminAddUser() {
+  const username = document.getElementById("adminNewUser").value.trim();
+  const password = document.getElementById("adminNewPass").value;
+  const role = document.getElementById("adminNewRole").value;
+  if (!username || !password) { alert("Thiếu username/password"); return; }
+  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role }) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || "Lỗi"); return; }
+  document.getElementById("adminNewUser").value = "";
+  document.getElementById("adminNewPass").value = "";
+  loadAdminUsers();
+}
+
+async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
+async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
+async function adminDelUser(id) { if (!confirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+
+async function loadAdminHistory() {
+  try {
+    const res = await apiFetch("/admin/history?limit=50");
+    if (!res.ok) return;
+    const items = await res.json();
+    const grid = document.getElementById("adminHistoryGrid");
+    grid.innerHTML = "";
+    if (!items.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
+    items.forEach(item => {
+      const card = document.createElement("div");
+      card.className = "img-card";
+      const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+      if (item.image_url) {
+        card.innerHTML = `<img src="${item.image_url}" loading="lazy" onerror="this.style.display='none'"/>
+          <div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">👤 ${esc(item.username)} · ${esc(item.model)} · ${time}</div></div>`;
+      } else {
+        card.innerHTML = `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div><div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">👤 ${esc(item.username)} · ${time}</div></div>`;
+      }
+      grid.appendChild(card);
+    });
+  } catch (e) {}
+}
+// ── UI Helpers ────────────────────────────────────────────────────────────────
+function setLoading(on) {
+  document.getElementById("runBtn").disabled = on;
+  document.getElementById("pauseBtn").disabled = !on;
+  document.getElementById("stopBtn").disabled = !on;
+  document.getElementById("progressCard").style.display = on ? "block" : "none";
+}
+
+function updateProgress(job) {
+  const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("progressText").textContent = `${job.completed} / ${job.total} ảnh (${pct}%)`;
+  const labels = { pending: "Chờ", running: "Đang chạy", done: "Hoàn thành", error: "Lỗi" };
+  const badge = document.getElementById("progressBadge");
+  badge.className = `badge badge-${job.status}`; badge.textContent = labels[job.status] || job.status;
+  const sb = document.getElementById("statusBadge");
+  sb.className = `badge badge-${job.status}`; sb.textContent = labels[job.status] || job.status;
+}
+
+// ── Results Table ──────────────────────────────────────────────────────────────
+function populateResultsTable() {
+  const allPrompts = batchFiles.flatMap(f => f.prompts);
+  const tbody = document.getElementById("resultsBody");
+  const empty = document.getElementById("resultsEmpty");
+  const badge = document.getElementById("promptCountBadge");
+
+  if (!allPrompts.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "";
+    badge.style.display = "none";
+    return;
+  }
+  empty.style.display = "none";
+  badge.style.display = "";
+  badge.textContent = `${allPrompts.length} prompt`;
+
+  tbody.innerHTML = allPrompts.map((text, i) => {
+    const imgs = rowRefImages[i] || [];
+    const refCell = imgs.length
+      ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
+      : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
+    return `<tr id="resRow${i}">
+      <td>${i + 1}</td>
+      <td><div class="prompt-cell">${esc(text)}</div></td>
+      <td style="text-align:center">${refCell}</td>
+      <td class="status-cell">⏳ Chờ</td>
+      <td style="text-align:center"><span style="color:var(--muted);font-size:0.72rem">—</span></td>
+    </tr>`;
+  }).join("");
+}
+
+function updateResultsFromJob(job) {
+  const images = job.images || [];
+  const allPrompts = batchFiles.flatMap(f => f.prompts);
+  if (!allPrompts.length) return;
+
+  // Mark all rows based on job state
+  const completed = job.completed || 0;
+  const total = job.total || allPrompts.length;
+
+  // Update completed rows from images array (match by index since backend processes in order)
+  images.forEach((img, idx) => {
+    const row = document.getElementById(`resRow${idx}`);
+    if (!row) return;
+    const cells = row.cells;
+    if (img.url) {
+      row.className = "row-done";
+      cells[3].innerHTML = '<span class="status-ok">✅ Xong</span>';
+      cells[4].innerHTML = `<img src="${img.url}" class="result-thumb" onclick="window.open(this.src)" onerror="this.outerHTML='❌'"/>
+        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a></div>`;
+    } else {
+      row.className = "row-error";
+      cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';
+      cells[4].innerHTML = `<span style="font-size:0.68rem;color:var(--error)">${esc(img.error || "Lỗi")}</span>`;
+    }
+  });
+
+  // Mark currently running row
+  if (job.status === "running" && images.length < total) {
+    const runIdx = images.length;
+    const row = document.getElementById(`resRow${runIdx}`);
+    if (row && row.className !== "row-done" && row.className !== "row-error") {
+      row.className = "row-running";
+      row.cells[3].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang chạy</span>';
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+}
+
 function clearResults() {
-  document.getElementById('resultsGrid').innerHTML = '<div class="empty-state"><div class="empty-icon">🖼️</div><div>Ảnh sẽ hiển thị ở đây sau khi tạo xong</div></div>';
-  document.getElementById('statusBadge').textContent = '';
+  document.getElementById("resultsBody").innerHTML = "";
+  document.getElementById("resultsEmpty").style.display = "";
+  document.getElementById("statusBadge").textContent = "";
+  document.getElementById("promptCountBadge").style.display = "none";
+  rowRefImages = {};
 }
 
-function downloadAll() {
-  document.querySelectorAll('.img-card a[download]').forEach(a => a.click());
+async function downloadAll() {
+  // Collect all result image URLs from table
+  const urls = [];
+  document.querySelectorAll("#resultsBody .result-thumb").forEach(img => {
+    if (img.src) urls.push(img.src);
+  });
+  if (!urls.length) { alert("Không có ảnh để tải"); return; }
+
+  const btn = document.querySelector('[onclick="downloadAll()"]');
+  const origText = btn.textContent;
+  btn.textContent = "⏳ Đang gom ZIP...";
+  btn.disabled = true;
+
+  try {
+    if (!window.JSZip) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const zip = new JSZip();
+    let idx = 0;
+    for (const url of urls) {
+      try {
+        btn.textContent = `⏳ Tải ${idx + 1}/${urls.length}...`;
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const ext = blob.type?.includes("png") ? "png" : blob.type?.includes("webp") ? "webp" : "jpg";
+        zip.file(`image_${String(idx + 1).padStart(3, "0")}.${ext}`, blob);
+        idx++;
+      } catch (e) { console.warn("Skip:", url, e); }
+    }
+    if (!idx) { alert("Không tải được ảnh nào"); return; }
+    btn.textContent = "⏳ Đang nén ZIP...";
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content);
+    a.download = `banana_pro_${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    alert("Lỗi tải ZIP: " + e.message);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
 }
+function showError(msg) { const el = document.getElementById("errorMsg"); el.textContent = "⚠️ " + msg; el.style.display = "block"; }
+function hideError() { document.getElementById("errorMsg").style.display = "none"; }
+function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 
-function showError(msg) { const el = document.getElementById('errorMsg'); el.textContent = '⚠️ ' + msg; el.style.display = 'block'; }
-function hideError() { document.getElementById('errorMsg').style.display = 'none'; }
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-// ── Cookie Utils ──────────────────────────────────────────────────────────────
 function parseCookieInput(raw) {
   raw = raw.trim();
-  if (raw.startsWith('[')) {
-    try { const items = JSON.parse(raw); return Object.fromEntries(items.map(c => [c.name, c.value])); } catch(e) {}
-  }
-  // name=value; name2=value2
+  if (raw.startsWith("[")) { try { const items = JSON.parse(raw); return Object.fromEntries(items.map(c => [c.name, c.value])); } catch (e) {} }
   const obj = {};
-  raw.split(';').forEach(part => {
-    const idx = part.indexOf('=');
-    if (idx > 0) obj[part.slice(0,idx).trim()] = part.slice(idx+1).trim();
-  });
+  raw.split(";").forEach(part => { const idx = part.indexOf("="); if (idx > 0) obj[part.slice(0, idx).trim()] = part.slice(idx + 1).trim(); });
   return obj;
 }
 
@@ -418,5 +753,5 @@ function cookieHash(obj) {
   const str = JSON.stringify(obj);
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  return Math.abs(h).toString(16).padStart(8,'0');
+  return Math.abs(h).toString(16).padStart(8, "0");
 }
