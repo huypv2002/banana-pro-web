@@ -57,6 +57,8 @@ class GenerateRequest(BaseModel):
     model: str = "NARWHAL"
     aspect_ratio: str = "16:9"
     variants: int = 1
+    reference_images: List[str] = []   # base64 images cho Image-to-Image
+    folder_images: dict = {}           # {name: [base64...]} cho Folder Structure
 
 
 class JobStatus(BaseModel):
@@ -91,7 +93,8 @@ def _extract_image_url(result: dict) -> str:
 
 
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
-                    model: str, aspect_ratio: str, variants: int):
+                    model: str, aspect_ratio: str, variants: int,
+                    reference_images: list = None, folder_images: dict = None):
     job = jobs[job_id]
     job["status"] = "running"
     try:
@@ -106,6 +109,26 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         project_id = client.flow_project_id
         aspect = ASPECT_MAP.get(aspect_ratio, "IMAGE_ASPECT_RATIO_LANDSCAPE")
 
+        # Upload reference images (Image-to-Image mode)
+        global_image_inputs = []
+        if reference_images:
+            for b64 in reference_images:
+                try:
+                    import tempfile, base64 as _b64
+                    header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
+                    ext = 'jpg'
+                    if 'png' in header: ext = 'png'
+                    elif 'webp' in header: ext = 'webp'
+                    with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
+                        f.write(_b64.b64decode(data))
+                        tmp_path = f.name
+                    media_id = client.upload_image(tmp_path)
+                    os.unlink(tmp_path)
+                    if media_id:
+                        global_image_inputs.append({"name": media_id.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
+                except Exception as e:
+                    logger.warning(f"Upload ref image failed: {e}")
+
         for prompt in prompts:
             if job.get("cancelled"):
                 break
@@ -113,6 +136,29 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                 if job.get("cancelled"):
                     break
                 try:
+                    # Folder structure: match ảnh theo tên prompt
+                    image_inputs = list(global_image_inputs)
+                    if folder_images:
+                        key = prompt.strip().lower()[:30]
+                        for fname, imgs in folder_images.items():
+                            if fname in key or key in fname:
+                                for b64 in imgs[:3]:
+                                    try:
+                                        import tempfile, base64 as _b64
+                                        header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
+                                        ext = 'jpg'
+                                        if 'png' in header: ext = 'png'
+                                        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
+                                            f.write(_b64.b64decode(data))
+                                            tmp_path = f.name
+                                        media_id = client.upload_image(tmp_path)
+                                        os.unlink(tmp_path)
+                                        if media_id:
+                                            image_inputs.append({"name": media_id.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
+                                    except Exception:
+                                        pass
+                                break
+
                     request_item = {
                         "clientContext": {
                             "sessionId": f";{int(time.time() * 1000)}",
@@ -124,6 +170,9 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                         "imageAspectRatio": aspect,
                         "structuredPrompt": {"parts": [{"text": prompt}]},
                     }
+                    if image_inputs:
+                        request_item["imageInputs"] = image_inputs
+
                     result = client.generate_flow_images([request_item], project_id=project_id)
                     if result:
                         url = _extract_image_url(result)
@@ -161,7 +210,8 @@ async def generate(req: GenerateRequest):
 
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_generation,
-                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants)
+                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
+                         req.reference_images or [], req.folder_images or {})
 
     return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 
