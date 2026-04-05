@@ -34,9 +34,14 @@ if not ok:
     print("❌ Không lấy được token. Cookie hết hạn?")
     sys.exit(1)
 
-print("\n--- Generate image ---")
+print("\n--- Create workflow ---")
+workflow_id = client.create_whisk_workflow()
+print(f"Workflow ID: {workflow_id}")
+if not workflow_id:
+    print("❌ Không tạo được workflow")
+    sys.exit(1)
 result = client.generate_image_from_text(
-    workflow_id=client.flow_project_id,
+    workflow_id=workflow_id,
     prompt="a cute cat",
     image_model="NARWHAL",
     aspect_ratio="16:9",

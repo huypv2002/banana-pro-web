@@ -98,8 +98,10 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token. Cookie có thể đã hết hạn.")
 
-        # Lấy workflow_id (project)
-        workflow_id = client.flow_project_id
+        # Tạo workflow mới cho session này
+        workflow_id = client.create_whisk_workflow()
+        if not workflow_id:
+            raise ValueError("Không thể tạo workflow. Cookie có thể đã hết hạn.")
 
         for prompt in prompts:
             if job.get("cancelled"):
