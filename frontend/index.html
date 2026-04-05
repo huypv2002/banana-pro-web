@@ -1,170 +1,32 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>🍌 Banana Pro – Tạo Ảnh AI</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f0f13; --surface: #1a1a24; --surface2: #22222f;
-      --border: #2e2e42; --accent: #7c6af7; --accent2: #a78bfa;
-      --text: #e2e2f0; --muted: #7878a0; --success: #34d399;
-      --error: #f87171; --radius: 12px;
-    }
-    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
-    header { padding: 16px 28px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
-    header h1 { font-size: 1.3rem; font-weight: 700; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px; width: 100%; flex: 1; display: grid; grid-template-columns: 400px 1fr; gap: 20px; align-items: start; }
-    @media (max-width: 800px) { .container { grid-template-columns: 1fr; } }
-    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-    label { font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom: 5px; }
-    input, textarea, select { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 9px 12px; font-size: 0.88rem; outline: none; transition: border-color .2s; }
-    input:focus, textarea:focus, select:focus { border-color: var(--accent); }
-    textarea { resize: vertical; font-family: inherit; }
-    .row { display: flex; gap: 10px; }
-    .row > * { flex: 1; }
-    button { cursor: pointer; border: none; border-radius: 8px; font-weight: 600; font-size: 0.88rem; padding: 10px 18px; transition: opacity .2s, transform .1s; }
-    button:active { transform: scale(.98); }
-    button:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #fff; width: 100%; }
-    .btn-primary:hover:not(:disabled) { opacity: .88; }
-    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-    .btn-danger { background: #3d1f1f; color: var(--error); border: 1px solid #5a2a2a; }
-
-    /* Tabs */
-    .tabs { display: flex; gap: 4px; background: var(--surface2); border-radius: 8px; padding: 4px; }
-    .tab { flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--muted); transition: all .2s; border: none; background: none; }
-    .tab.active { background: var(--accent); color: #fff; }
-
-    /* File input */
-    .file-row { display: flex; gap: 8px; align-items: center; }
-    .file-row input { flex: 1; }
-    .file-row button { flex-shrink: 0; padding: 9px 14px; }
-
-    /* Image-to-Image section */
-    .ref-section { display: none; flex-direction: column; gap: 10px; }
-    .ref-section.visible { display: flex; }
-    .ref-label { font-size: 0.78rem; color: var(--muted); padding: 6px 10px; background: var(--surface2); border-radius: 6px; border: 1px dashed var(--border); }
-
-    /* Progress */
-    .progress-wrap { display: none; flex-direction: column; gap: 6px; }
-    .progress-wrap.visible { display: flex; }
-    .progress-bar-bg { background: var(--surface2); border-radius: 99px; height: 6px; overflow: hidden; }
-    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 99px; transition: width .4s ease; width: 0%; }
-    .progress-text { font-size: 0.8rem; color: var(--muted); }
-
-    /* Badge */
-    .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 0.72rem; font-weight: 700; }
-    .badge-pending { background: #2a2a1a; color: #facc15; }
-    .badge-running { background: #1a2a3a; color: #60a5fa; }
-    .badge-done { background: #1a3a2a; color: var(--success); }
-    .badge-error { background: #3a1a1a; color: var(--error); }
-
-    /* Results */
-    .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-    .results-header h2 { font-size: 0.95rem; font-weight: 700; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
-    .card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: var(--surface2); }
-    .card-body { padding: 8px 10px; }
-    .card-prompt { font-size: 0.75rem; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .card-error { font-size: 0.75rem; color: var(--error); padding: 8px 10px; }
-    .card-actions { padding: 6px 10px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-    .card-actions a { font-size: 0.75rem; color: var(--accent2); text-decoration: none; }
-    .card-actions a:hover { text-decoration: underline; }
-    .empty-state { text-align: center; padding: 50px 20px; color: var(--muted); }
-    .empty-state .icon { font-size: 2.5rem; margin-bottom: 10px; }
-    .error-msg { background: #3a1a1a; border: 1px solid #5a2a2a; border-radius: 8px; padding: 10px 14px; color: var(--error); font-size: 0.83rem; }
-    .cookie-help { background: #1a1f2e; border: 1px solid #2a3050; border-radius: 8px; padding: 10px 12px; font-size: 0.78rem; color: #8899cc; line-height: 1.6; }
-    .cookie-help a { color: var(--accent2); }
-    .hint { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
-  </style>
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-<header>
-  <span>🍌</span>
-  <h1>Banana Pro – Tạo Ảnh AI</h1>
+<!-- HEADER -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">🍌</span>
+    <span class="app-name">Banana Pro</span>
+  </div>
+  <div class="header-right">
+    <span id="userInfo" class="user-info"></span>
+    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Quản lý Cookie</button>
+  </div>
 </header>
 
-<div class="container">
-  <!-- LEFT: Controls -->
-  <div class="panel">
-    <!-- Cookie -->
-    <div>
-      <label>Cookie Google Labs</label>
-      <textarea id="cookieInput" rows="4" placeholder="Dán cookie JSON từ Cookie Editor..."></textarea>
-      <div class="cookie-help" style="margin-top:6px">
-        Cài <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank">Cookie Editor</a>
-        → vào <a href="https://labs.google" target="_blank">labs.google</a> → Export → Copy
-      </div>
-    </div>
+<div class="main-layout">
+  <!-- LEFT PANEL -->
+  <div class="left-panel" id="leftPanel">
 
-    <!-- Mode tabs -->
-    <div>
-      <label>Chế độ</label>
-      <div class="tabs">
-        <button class="tab active" onclick="setMode('txt')">📄 File TXT</button>
-        <button class="tab" onclick="setMode('i2i')">🖼️ Image-to-Image</button>
-        <button class="tab" onclick="setMode('folder')">📁 Folder Structure</button>
-      </div>
-    </div>
-
-    <!-- TXT mode -->
-    <div id="modeTxt">
-      <label>File Prompts (.txt)</label>
-      <div class="file-row">
-        <input type="text" id="txtFilePath" readonly placeholder="Chọn file .txt (mỗi dòng 1 prompt)..." />
-        <button class="btn-secondary" onclick="document.getElementById('txtFileInput').click()">Chọn</button>
-        <input type="file" id="txtFileInput" accept=".txt" style="display:none" onchange="loadTxtFile(this)" />
-      </div>
-      <div class="hint" id="txtFileHint"></div>
-    </div>
-
-    <!-- Image-to-Image mode -->
-    <div id="modeI2I" style="display:none">
-      <label>File Prompts (.txt)</label>
-      <div class="file-row">
-        <input type="text" id="i2iTxtPath" readonly placeholder="File .txt chứa prompts..." />
-        <button class="btn-secondary" onclick="document.getElementById('i2iFileInput').click()">Chọn</button>
-        <input type="file" id="i2iFileInput" accept=".txt" style="display:none" onchange="loadI2IFile(this)" />
-      </div>
-      <div style="margin-top:10px">
-        <label>Ảnh tham chiếu (Subject / Scene / Style)</label>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-          <div class="file-row">
-            <input type="text" id="subjectImg" readonly placeholder="Subject image..." />
-            <button class="btn-secondary" onclick="pickImg('subjectImg','subjectInput')">Chọn</button>
-            <input type="file" id="subjectInput" accept="image/*" style="display:none" onchange="setImg('subjectImg',this)" />
-          </div>
-          <div class="file-row">
-            <input type="text" id="sceneImg" readonly placeholder="Scene image (tùy chọn)..." />
-            <button class="btn-secondary" onclick="pickImg('sceneImg','sceneInput')">Chọn</button>
-            <input type="file" id="sceneInput" accept="image/*" style="display:none" onchange="setImg('sceneImg',this)" />
-          </div>
-          <div class="file-row">
-            <input type="text" id="styleImg" readonly placeholder="Style image (tùy chọn)..." />
-            <button class="btn-secondary" onclick="pickImg('styleImg','styleInput')">Chọn</button>
-            <input type="file" id="styleInput" accept="image/*" style="display:none" onchange="setImg('styleImg',this)" />
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Folder Structure mode -->
-    <div id="modeFolder" style="display:none">
-      <label>Thư mục chứa prompts (.txt) + ảnh</label>
-      <div class="file-row">
-        <input type="text" id="folderTxtPath" readonly placeholder="Chọn thư mục..." />
-        <button class="btn-secondary" onclick="document.getElementById('folderInput').click()">Chọn</button>
-        <input type="file" id="folderInput" webkitdirectory style="display:none" onchange="loadFolder(this)" />
-      </div>
-      <div class="hint" id="folderHint"></div>
-    </div>
-
-    <!-- Settings -->
-    <div class="row">
-      <div>
+    <!-- CONFIG CARD -->
+    <div class="card">
+      <div class="card-title">⚙️ Cấu hình</div>
+      <div class="form-grid">
         <label>Model</label>
         <select id="modelSelect">
           <option value="NARWHAL">Banana Pro 2</option>
@@ -172,258 +34,219 @@
           <option value="GEM_PIX">Gem Pix</option>
           <option value="IMAGEN_3_5">Imagen 4</option>
         </select>
-      </div>
-      <div>
-        <label>Tỉ lệ</label>
+
+        <label>Tỷ lệ khung</label>
         <select id="aspectSelect">
-          <option value="16:9">16:9</option>
-          <option value="9:16">9:16</option>
-          <option value="1:1">1:1</option>
-          <option value="4:3">4:3</option>
-          <option value="3:4">3:4</option>
+          <option value="16:9">16:9 Ngang</option>
+          <option value="9:16">9:16 Dọc</option>
+          <option value="4:3">4:3 Ngang</option>
+          <option value="3:4">3:4 Dọc</option>
+          <option value="1:1">1:1 Vuông</option>
         </select>
-      </div>
-      <div>
-        <label>Số ảnh/prompt</label>
-        <input type="number" id="variantsInput" value="1" min="1" max="4" />
+
+        <label>Số ảnh / prompt</label>
+        <input type="number" id="variantsInput" value="1" min="1" max="10"/>
+
+        <label>Delay (giây)</label>
+        <input type="number" id="delayInput" value="8" min="1" max="300"/>
+
+        <label>Thư mục lưu ảnh</label>
+        <div class="input-note">Ảnh lưu tự động trên server</div>
       </div>
     </div>
 
-    <button class="btn-primary" id="generateBtn" onclick="startGeneration()">✨ Tạo Ảnh</button>
-    <button class="btn-danger" id="stopBtn" onclick="stopGeneration()" style="display:none">⏹ Dừng</button>
+    <!-- MODE CARD -->
+    <div class="card">
+      <div class="card-title">🎨 Chế độ tạo ảnh</div>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="mode" value="normal" checked onchange="setMode('normal')"/>
+          Thường (file .txt)
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="mode" value="multiple" onchange="setMode('multiple')"/>
+          Multiple-to-Image (folder ảnh)
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="mode" value="folder" onchange="setMode('folder')"/>
+          Folder Structure (folder cha)
+        </label>
+      </div>
+    </div>
 
-    <div class="progress-wrap" id="progressWrap">
+    <!-- PROMPT SOURCE CARD -->
+    <div class="card" id="promptSourceCard">
+      <div class="card-title">📄 Nguồn prompt (.txt)</div>
+      <p class="card-desc">Chọn 1 file hoặc 1 thư mục chứa nhiều file .txt để chạy hàng loạt.</p>
+
+      <div class="field-row">
+        <label>File .txt</label>
+        <div class="input-btn-row">
+          <input type="text" id="txtFilePath" readonly placeholder="Chọn file .txt chứa prompts…"/>
+          <button class="btn btn-blue" onclick="document.getElementById('txtFileInput').click()">Chọn file</button>
+          <input type="file" id="txtFileInput" accept=".txt" style="display:none" onchange="loadTxtFile(this)"/>
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:8px">
+        <label>Thư mục .txt</label>
+        <div class="input-btn-row">
+          <input type="text" id="folderTxtPath" readonly placeholder="Chọn thư mục chứa nhiều file .txt…"/>
+          <button class="btn btn-blue" onclick="document.getElementById('folderTxtInput').click()">Chọn thư mục</button>
+          <input type="file" id="folderTxtInput" webkitdirectory style="display:none" onchange="loadFolderTxt(this)"/>
+        </div>
+      </div>
+
+      <div style="text-align:right;margin-top:6px">
+        <button class="btn btn-ghost" onclick="clearSources()">🧹 Xóa danh sách</button>
+      </div>
+
+      <table class="batch-table" id="batchTable">
+        <thead><tr><th>STT</th><th>Tên File</th><th>Số Prompt</th><th>Trạng thái</th></tr></thead>
+        <tbody id="batchTableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- MULTIPLE-TO-IMAGE CARD -->
+    <div class="card" id="multipleCard" style="display:none">
+      <div class="card-title">🖼️ Thư mục ảnh tham chiếu</div>
+      <p class="card-desc">Chọn 3 folder chứa ảnh Subject/Scene/Style.</p>
+      <div class="ref-folders">
+        <div class="field-row">
+          <label>Subject Folder</label>
+          <div class="input-btn-row">
+            <input type="text" id="subjectFolder" readonly placeholder="Thư mục ảnh Subject..."/>
+            <button class="btn btn-blue" onclick="document.getElementById('subjectFolderInput').click()">Chọn</button>
+            <input type="file" id="subjectFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('subject',this)"/>
+          </div>
+        </div>
+        <div class="field-row">
+          <label>Scene Folder</label>
+          <div class="input-btn-row">
+            <input type="text" id="sceneFolder" readonly placeholder="Thư mục ảnh Scene..."/>
+            <button class="btn btn-blue" onclick="document.getElementById('sceneFolderInput').click()">Chọn</button>
+            <input type="file" id="sceneFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('scene',this)"/>
+          </div>
+        </div>
+        <div class="field-row">
+          <label>Style Folder</label>
+          <div class="input-btn-row">
+            <input type="text" id="styleFolder" readonly placeholder="Thư mục ảnh Style..."/>
+            <button class="btn btn-blue" onclick="document.getElementById('styleFolderInput').click()">Chọn</button>
+            <input type="file" id="styleFolderInput" webkitdirectory style="display:none" onchange="setRefFolder('style',this)"/>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FOLDER STRUCTURE CARD -->
+    <div class="card" id="folderStructureCard" style="display:none">
+      <div class="card-title">📁 Folder Structure Mode</div>
+      <p class="card-desc">Chọn folder cha chứa các file .txt và folder ảnh cùng tên.</p>
+      <div class="field-row">
+        <label>Folder cha</label>
+        <div class="input-btn-row">
+          <input type="text" id="parentFolder" readonly placeholder="Chọn folder cha..."/>
+          <button class="btn btn-blue" onclick="document.getElementById('parentFolderInput').click()">Chọn folder cha</button>
+          <input type="file" id="parentFolderInput" webkitdirectory style="display:none" onchange="loadParentFolder(this)"/>
+        </div>
+      </div>
+      <table class="batch-table" id="folderStructureTable" style="margin-top:8px">
+        <thead><tr><th>STT</th><th>Folder Con</th><th>Số Ảnh</th><th>Số Prompt</th></tr></thead>
+        <tbody id="folderStructureBody"></tbody>
+      </table>
+    </div>
+
+    <!-- REF IMAGE DIR CARD -->
+    <div class="card" id="refDirCard">
+      <div class="card-title">🖼️ Thư mục ảnh tham chiếu (tùy chọn)</div>
+      <div class="input-btn-row">
+        <input type="text" id="refDirPath" readonly placeholder="Chọn thư mục chứa ảnh tham chiếu…"/>
+        <button class="btn btn-blue" onclick="document.getElementById('refDirInput').click()">Chọn</button>
+        <input type="file" id="refDirInput" webkitdirectory style="display:none" onchange="loadRefDir(this)"/>
+      </div>
+      <div id="refImgPreview" class="ref-preview"></div>
+    </div>
+
+    <!-- ACTION BUTTONS -->
+    <div class="action-buttons">
+      <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ CHẠY NGAY</button>
+      <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>⏸ TẠM DỪNG</button>
+      <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
+    </div>
+
+    <!-- PROGRESS -->
+    <div class="card" id="progressCard" style="display:none">
+      <div class="progress-header">
+        <span id="progressLabel">Đang chạy...</span>
+        <span id="progressBadge" class="badge badge-running">Đang chạy</span>
+      </div>
       <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
-      <div class="progress-text" id="progressText">Đang khởi động...</div>
+      <div class="progress-text" id="progressText">0 / 0 ảnh (0%)</div>
     </div>
+
     <div id="errorMsg" class="error-msg" style="display:none"></div>
   </div>
 
-  <!-- RIGHT: Results -->
-  <div>
+  <!-- RIGHT PANEL: Results grid -->
+  <div class="right-panel">
     <div class="results-header">
       <h2>Kết quả <span id="statusBadge"></span></h2>
-      <button onclick="clearResults()" class="btn-secondary" style="font-size:0.78rem;padding:5px 12px">🗑 Xóa</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="downloadAll()">⬇ Tải tất cả</button>
+        <button class="btn btn-ghost" onclick="clearResults()">🗑 Xóa</button>
+      </div>
     </div>
-    <div id="resultsGrid" class="grid">
-      <div class="empty-state"><div class="icon">🖼️</div><div>Ảnh sẽ hiển thị ở đây</div></div>
+    <div id="resultsGrid" class="results-grid">
+      <div class="empty-state">
+        <div class="empty-icon">🖼️</div>
+        <div>Ảnh sẽ hiển thị ở đây sau khi tạo xong</div>
+      </div>
     </div>
   </div>
 </div>
 
-<script>
-const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
+<!-- COOKIE MODAL -->
+<div class="modal-overlay" id="cookieModal" style="display:none" onclick="closeCookieModalOutside(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🍪 Quản lý Cookie</h3>
+      <button class="modal-close" onclick="closeCookieModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="cookie-actions">
+        <button class="btn btn-green" onclick="importCookieTxt()">📝 Import TXT</button>
+        <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
+        <input type="file" id="cookieTxtImport" accept=".txt" style="display:none" onchange="loadCookieTxt(this)"/>
+      </div>
 
-let currentMode = 'txt';
-let currentJobId = null;
-let pollInterval = null;
-let loadedPrompts = [];       // từ file txt
-let i2iPrompts = [];          // prompts cho i2i
-let i2iImages = {};           // {subject, scene, style} base64
-let folderPrompts = [];       // prompts từ folder
-let folderImages = {};        // {promptName: [base64...]}
+      <div class="cookie-help">
+        <strong>Cách lấy cookie:</strong> Cài
+        <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank">Cookie Editor</a>
+        → vào <a href="https://labs.google" target="_blank">labs.google</a> → đăng nhập → Export → Copy
+      </div>
 
-function setMode(mode) {
-  currentMode = mode;
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['txt','i2i','folder'][i] === mode));
-  document.getElementById('modeTxt').style.display = mode === 'txt' ? 'block' : 'none';
-  document.getElementById('modeI2I').style.display = mode === 'i2i' ? 'block' : 'none';
-  document.getElementById('modeFolder').style.display = mode === 'folder' ? 'block' : 'none';
-}
+      <div class="field-row" style="margin-top:12px">
+        <label>Thêm cookie mới</label>
+        <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-green" onclick="addCookie()">➕ Thêm</button>
+        <button class="btn btn-blue" onclick="testCookie()">🔍 Test cookie</button>
+      </div>
+      <div id="cookieTestResult" style="margin-top:8px;font-size:0.82rem"></div>
 
-// ── File TXT ──────────────────────────────────────────────────────────────────
-function loadTxtFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  document.getElementById('txtFilePath').value = file.name;
-  const reader = new FileReader();
-  reader.onload = e => {
-    loadedPrompts = e.target.result.split('\n').map(s => s.trim()).filter(Boolean);
-    document.getElementById('txtFileHint').textContent = `✅ ${loadedPrompts.length} prompts`;
-  };
-  reader.readAsText(file);
-}
+      <table class="cookie-table" id="cookieTable" style="margin-top:12px">
+        <thead><tr><th>#</th><th>Cookie (hash)</th><th>Email</th><th>Trạng thái</th><th></th></tr></thead>
+        <tbody id="cookieTableBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="saveCookies()">💾 Lưu & Đóng</button>
+    </div>
+  </div>
+</div>
 
-function loadI2IFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  document.getElementById('i2iTxtPath').value = file.name;
-  const reader = new FileReader();
-  reader.onload = e => { i2iPrompts = e.target.result.split('\n').map(s => s.trim()).filter(Boolean); };
-  reader.readAsText(file);
-}
-
-function pickImg(inputId, fileId) { document.getElementById(fileId).click(); }
-function setImg(inputId, fileInput) {
-  const file = fileInput.files[0];
-  if (!file) return;
-  document.getElementById(inputId).value = file.name;
-  const key = inputId.replace('Img','');
-  const reader = new FileReader();
-  reader.onload = e => { i2iImages[key] = e.target.result; };
-  reader.readAsDataURL(file);
-}
-
-function loadFolder(input) {
-  const files = Array.from(input.files);
-  const txtFiles = files.filter(f => f.name.endsWith('.txt'));
-  const imgFiles = files.filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name));
-
-  folderPrompts = [];
-  folderImages = {};
-
-  let loaded = 0;
-  txtFiles.forEach(f => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const lines = e.target.result.split('\n').map(s => s.trim()).filter(Boolean);
-      folderPrompts.push(...lines);
-      loaded++;
-      if (loaded === txtFiles.length)
-        document.getElementById('folderHint').textContent = `✅ ${folderPrompts.length} prompts, ${imgFiles.length} ảnh`;
-    };
-    reader.readAsText(f);
-  });
-
-  // Load images theo tên file (match với prompt)
-  imgFiles.forEach(f => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const name = f.name.replace(/\.[^.]+$/, '').toLowerCase();
-      if (!folderImages[name]) folderImages[name] = [];
-      folderImages[name].push(e.target.result);
-    };
-    reader.readAsDataURL(f);
-  });
-
-  if (txtFiles.length === 0)
-    document.getElementById('folderHint').textContent = `⚠️ Không tìm thấy file .txt trong thư mục`;
-}
-
-// ── Generate ──────────────────────────────────────────────────────────────────
-async function startGeneration() {
-  const cookie = document.getElementById('cookieInput').value.trim();
-  if (!cookie) return showError('Vui lòng nhập cookie.');
-
-  let prompts = [];
-  let reference_images = null;
-
-  if (currentMode === 'txt') {
-    prompts = loadedPrompts;
-    if (!prompts.length) return showError('Vui lòng chọn file .txt có prompts.');
-  } else if (currentMode === 'i2i') {
-    prompts = i2iPrompts;
-    if (!prompts.length) return showError('Vui lòng chọn file .txt có prompts.');
-    reference_images = Object.values(i2iImages).filter(Boolean);
-  } else if (currentMode === 'folder') {
-    prompts = folderPrompts;
-    if (!prompts.length) return showError('Vui lòng chọn thư mục có file .txt.');
-  }
-
-  const model = document.getElementById('modelSelect').value;
-  const aspect_ratio = document.getElementById('aspectSelect').value;
-  const variants = parseInt(document.getElementById('variantsInput').value) || 1;
-
-  hideError();
-  setLoading(true);
-  clearResults();
-
-  try {
-    const body = { cookie, prompts, model, aspect_ratio, variants };
-    if (reference_images && reference_images.length) body.reference_images = reference_images;
-    if (currentMode === 'folder') body.folder_images = folderImages;
-
-    const res = await fetch(`${API_BASE}/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
-    const job = await res.json();
-    currentJobId = job.job_id;
-    updateProgress(job);
-    startPolling();
-  } catch(e) {
-    showError('Lỗi kết nối backend: ' + e.message);
-    setLoading(false);
-  }
-}
-
-function startPolling() {
-  pollInterval = setInterval(async () => {
-    if (!currentJobId) return;
-    try {
-      const res = await fetch(`${API_BASE}/jobs/${currentJobId}`);
-      if (!res.ok) return;
-      const job = await res.json();
-      updateProgress(job);
-      renderImages(job.images);
-      if (job.status === 'done' || job.status === 'error') {
-        clearInterval(pollInterval);
-        setLoading(false);
-        if (job.status === 'error') showError(job.error || 'Có lỗi xảy ra.');
-      }
-    } catch(e) {}
-  }, 2000);
-}
-
-async function stopGeneration() {
-  if (!currentJobId) return;
-  clearInterval(pollInterval);
-  await fetch(`${API_BASE}/jobs/${currentJobId}`, { method: 'DELETE' }).catch(()=>{});
-  setLoading(false);
-  document.getElementById('progressText').textContent = 'Đã dừng.';
-}
-
-// ── UI ────────────────────────────────────────────────────────────────────────
-function setLoading(on) {
-  document.getElementById('generateBtn').disabled = on;
-  document.getElementById('stopBtn').style.display = on ? 'block' : 'none';
-  document.getElementById('progressWrap').classList.toggle('visible', on);
-  if (!on) document.getElementById('stopBtn').style.display = 'none';
-}
-
-function updateProgress(job) {
-  const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
-  document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressText').textContent = `${job.completed} / ${job.total} ảnh (${pct}%)`;
-  const badge = document.getElementById('statusBadge');
-  const labels = { pending:'Chờ', running:'Đang chạy', done:'Hoàn thành', error:'Lỗi' };
-  badge.className = `badge badge-${job.status}`;
-  badge.textContent = labels[job.status] || job.status;
-}
-
-function renderImages(images) {
-  if (!images || !images.length) return;
-  const grid = document.getElementById('resultsGrid');
-  grid.innerHTML = '';
-  images.forEach(img => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    if (img.url) {
-      card.innerHTML = `
-        <img src="${img.url}" alt="${esc(img.prompt)}" loading="lazy" onerror="this.style.display='none'" />
-        <div class="card-body"><div class="card-prompt">${esc(img.prompt)}</div></div>
-        <div class="card-actions">
-          <a href="${img.url}" target="_blank" download>⬇ Tải</a>
-          <a href="${img.url}" target="_blank">🔗 Mở</a>
-        </div>`;
-    } else {
-      card.innerHTML = `<div class="card-error">❌ ${esc(img.error||'Thất bại')}</div><div class="card-body"><div class="card-prompt">${esc(img.prompt)}</div></div>`;
-    }
-    grid.appendChild(card);
-  });
-}
-
-function clearResults() {
-  document.getElementById('resultsGrid').innerHTML = '<div class="empty-state"><div class="icon">🖼️</div><div>Ảnh sẽ hiển thị ở đây</div></div>';
-  document.getElementById('statusBadge').textContent = '';
-  document.getElementById('statusBadge').className = 'badge';
-}
-
-function showError(msg) { const el = document.getElementById('errorMsg'); el.textContent = '⚠️ ' + msg; el.style.display = 'block'; }
-function hideError() { document.getElementById('errorMsg').style.display = 'none'; }
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-</script>
+<script src="app.js"></script>
 </body>
 </html>

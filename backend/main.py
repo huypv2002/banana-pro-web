@@ -192,6 +192,24 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         job["error"] = str(e)
 
 
+class TestCookieRequest(BaseModel):
+    cookie: str
+
+@app.post("/test-cookie")
+def test_cookie(req: TestCookieRequest):
+    try:
+        cookies = _parse_cookie_input(req.cookie)
+        if not cookies:
+            return {"ok": False, "error": "Cookie không hợp lệ"}
+        client = LabsFlowClient(cookies)
+        ok = client.fetch_access_token()
+        if ok:
+            return {"ok": True, "email": getattr(client, '_last_email', ''), "expires": ""}
+        return {"ok": False, "error": client.last_error_detail or "Không lấy được token"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
