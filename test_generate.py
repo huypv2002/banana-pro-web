@@ -38,11 +38,21 @@ if not workflow_id:
     print("❌ Không tạo được workflow:", client.last_error_detail)
     sys.exit(1)
 
-print("\n--- Generate image ---")
+print("\n--- Generate image (IMAGEN_3_5) ---")
 result = client.generate_image_from_text(
     workflow_id=workflow_id,
     prompt="a cute cat",
-    image_model="NARWHAL",
+    image_model="IMAGEN_3_5",
     aspect_ratio="16:9",
 )
-print(f"\nResult: {json.dumps(result, indent=2) if result else 'None - ' + str(client.last_error_detail)}")
+print(f"\nResult IMAGEN_3_5: {result and 'OK' or 'None - ' + str(client.last_error_detail)}")
+
+if not result:
+    print("\n--- Generate image (GEM_PIX_2) ---")
+    result = client.generate_image_from_text(
+        workflow_id=workflow_id,
+        prompt="a cute cat",
+        image_model="GEM_PIX_2",
+        aspect_ratio="16:9",
+    )
+    print(f"\nResult GEM_PIX_2: {result and 'OK - ' + str(result)[:200] or 'None - ' + str(client.last_error_detail)}")
