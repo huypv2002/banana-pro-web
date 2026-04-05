@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🍌 Banana Pro – Tạo Ảnh AI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a24;
+      --surface2: #22222f;
+      --border: #2e2e42;
+      --accent: #7c6af7;
+      --accent2: #a78bfa;
+      --text: #e2e2f0;
+      --muted: #7878a0;
+      --success: #34d399;
+      --error: #f87171;
+      --radius: 12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; }
+    header span { font-size: 1.6rem; }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px;
+      width: 100%;
+      flex: 1;
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+    }
+    textarea { resize: vertical; min-height: 120px; font-family: inherit; }
+
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 11px 20px;
+      transition: opacity .2s, transform .1s;
+    }
+    button:active { transform: scale(.98); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      width: 100%;
+    }
+    .btn-primary:hover:not(:disabled) { opacity: .88; }
+
+    .btn-danger {
+      background: #3d1f1f;
+      color: var(--error);
+      border: 1px solid #5a2a2a;
+    }
+    .btn-danger:hover:not(:disabled) { background: #4d2525; }
+
+    /* Progress */
+    .progress-wrap { display: none; flex-direction: column; gap: 8px; }
+    .progress-wrap.visible { display: flex; }
+    .progress-bar-bg {
+      background: var(--surface2);
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 99px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    .progress-text { font-size: 0.82rem; color: var(--muted); }
+
+    /* Status badge */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .badge-pending  { background: #2a2a1a; color: #facc15; }
+    .badge-running  { background: #1a2a3a; color: #60a5fa; }
+    .badge-done     { background: #1a3a2a; color: var(--success); }
+    .badge-error    { background: #3a1a1a; color: var(--error); }
+
+    /* Results grid */
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .results-header h2 { font-size: 1rem; font-weight: 700; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+      background: var(--surface2);
+    }
+    .card-body { padding: 10px 12px; }
+    .card-prompt {
+      font-size: 0.78rem;
+      color: var(--muted);
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .card-error {
+      font-size: 0.78rem;
+      color: var(--error);
+      padding: 10px 12px;
+    }
+    .card-actions {
+      padding: 8px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+    .card-actions a {
+      font-size: 0.78rem;
+      color: var(--accent2);
+      text-decoration: none;
+    }
+    .card-actions a:hover { text-decoration: underline; }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+    .error-msg {
+      background: #3a1a1a;
+      border: 1px solid #5a2a2a;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: var(--error);
+      font-size: 0.85rem;
+    }
+
+    /* Cookie helper */
+    .cookie-help {
+      background: #1a1f2e;
+      border: 1px solid #2a3050;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.8rem;
+      color: #8899cc;
+      line-height: 1.6;
+    }
+    .cookie-help strong { color: var(--accent2); }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🍌</span>
+  <h1>Banana Pro – Tạo Ảnh AI</h1>
+</header>
+
+<div class="container">
+  <!-- ── LEFT PANEL: Controls ── -->
+  <div class="panel">
+    <div>
+      <label>Cookie Google Labs</label>
+      <textarea id="cookieInput" placeholder="Dán cookie vào đây...&#10;Ví dụ: SID=xxx; HSID=xxx; ..." rows="5"></textarea>
+      <div class="cookie-help" style="margin-top:8px">
+        <strong>Cách lấy cookie:</strong><br>
+        1. Cài <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--accent2)">Cookie Editor</a> trên Chrome<br>
+        2. Vào <a href="https://labs.google" target="_blank" style="color:var(--accent2)">labs.google</a> và đăng nhập<br>
+        3. Mở Cookie Editor → Export → Copy All
+      </div>
+    </div>
+
+    <div>
+      <label>Prompts <span style="color:var(--muted);font-weight:400;text-transform:none">(mỗi dòng 1 prompt)</span></label>
+      <textarea id="promptsInput" placeholder="A futuristic city at sunset&#10;A cute cat wearing a hat&#10;..." rows="6"></textarea>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Model</label>
+        <select id="modelSelect">
+          <option value="NARWHAL">Banana Pro 2</option>
+          <option value="GEM_PIX_2">Banana Pro</option>
+          <option value="GEM_PIX">Gem Pix</option>
+          <option value="IMAGEN_3_5">Imagen 4</option>
+        </select>
+      </div>
+      <div>
+        <label>Tỉ lệ</label>
+        <select id="aspectSelect">
+          <option value="16:9">16:9</option>
+          <option value="9:16">9:16</option>
+          <option value="1:1">1:1</option>
+          <option value="4:3">4:3</option>
+          <option value="3:4">3:4</option>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label>Số ảnh mỗi prompt</label>
+      <input type="number" id="variantsInput" value="1" min="1" max="4" />
+    </div>
+
+    <button class="btn-primary" id="generateBtn" onclick="startGeneration()">
+      ✨ Tạo Ảnh
+    </button>
+
+    <button class="btn-danger" id="stopBtn" onclick="stopGeneration()" style="display:none">
+      ⏹ Dừng
+    </button>
+
+    <!-- Progress -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-text" id="progressText">Đang khởi động...</div>
+    </div>
+
+    <div id="errorMsg" class="error-msg" style="display:none"></div>
+  </div>
+
+  <!-- ── RIGHT PANEL: Results ── -->
+  <div>
+    <div class="results-header">
+      <h2>Kết quả <span id="statusBadge"></span></h2>
+      <button onclick="clearResults()" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border);font-size:0.8rem;padding:6px 14px">
+        🗑 Xóa
+      </button>
+    </div>
+    <div id="resultsGrid" class="grid">
+      <div class="empty-state">
+        <div class="icon">🖼️</div>
+        <div>Ảnh sẽ hiển thị ở đây sau khi tạo xong</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────────────
+  // Thay bằng IP/domain VPS của bạn
+  const API_BASE = window.API_BASE || "http://148.163.121.139:8088";
+
+  let currentJobId = null;
+  let pollInterval = null;
+
+  // ── Generate ─────────────────────────────────────────────────────────────────
+  async function startGeneration() {
+    const cookie = document.getElementById("cookieInput").value.trim();
+    const promptsRaw = document.getElementById("promptsInput").value.trim();
+    const model = document.getElementById("modelSelect").value;
+    const aspect_ratio = document.getElementById("aspectSelect").value;
+    const variants = parseInt(document.getElementById("variantsInput").value) || 1;
+
+    if (!cookie) return showError("Vui lòng nhập cookie.");
+    if (!promptsRaw) return showError("Vui lòng nhập ít nhất 1 prompt.");
+
+    const prompts = promptsRaw.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!prompts.length) return showError("Không tìm thấy prompt hợp lệ.");
+
+    hideError();
+    setLoading(true);
+    clearResults();
+
+    try {
+      const res = await fetch(`${API_BASE}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie, prompts, model, aspect_ratio, variants }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+
+      const job = await res.json();
+      currentJobId = job.job_id;
+      updateProgress(job);
+      startPolling();
+
+    } catch (e) {
+      showError("Lỗi kết nối backend: " + e.message);
+      setLoading(false);
+    }
+  }
+
+  // ── Polling ──────────────────────────────────────────────────────────────────
+  function startPolling() {
+    pollInterval = setInterval(async () => {
+      if (!currentJobId) return;
+      try {
+        const res = await fetch(`${API_BASE}/jobs/${currentJobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+        updateProgress(job);
+        renderImages(job.images);
+
+        if (job.status === "done" || job.status === "error") {
+          clearInterval(pollInterval);
+          setLoading(false);
+          if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
+        }
+      } catch (e) {
+        console.error("Poll error:", e);
+      }
+    }, 2000);
+  }
+
+  // ── Stop ─────────────────────────────────────────────────────────────────────
+  async function stopGeneration() {
+    if (!currentJobId) return;
+    clearInterval(pollInterval);
+    await fetch(`${API_BASE}/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
+    setLoading(false);
+    document.getElementById("progressText").textContent = "Đã dừng.";
+  }
+
+  // ── UI helpers ───────────────────────────────────────────────────────────────
+  function setLoading(on) {
+    document.getElementById("generateBtn").disabled = on;
+    document.getElementById("stopBtn").style.display = on ? "block" : "none";
+    document.getElementById("progressWrap").classList.toggle("visible", on);
+    if (!on) document.getElementById("stopBtn").style.display = "none";
+  }
+
+  function updateProgress(job) {
+    const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
+    document.getElementById("progressFill").style.width = pct + "%";
+    document.getElementById("progressText").textContent =
+      `${job.completed} / ${job.total} ảnh  (${pct}%)`;
+
+    const badge = document.getElementById("statusBadge");
+    const labels = { pending: "Chờ", running: "Đang chạy", done: "Hoàn thành", error: "Lỗi" };
+    badge.className = `badge badge-${job.status}`;
+    badge.textContent = labels[job.status] || job.status;
+  }
+
+  function renderImages(images) {
+    if (!images || !images.length) return;
+    const grid = document.getElementById("resultsGrid");
+    grid.innerHTML = "";
+
+    images.forEach(img => {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      if (img.url) {
+        card.innerHTML = `
+          <img src="${img.url}" alt="${escHtml(img.prompt)}" loading="lazy"
+               onerror="this.style.display='none'" />
+          <div class="card-body">
+            <div class="card-prompt">${escHtml(img.prompt)}</div>
+          </div>
+          <div class="card-actions">
+            <a href="${img.url}" target="_blank" download>⬇ Tải xuống</a>
+            <a href="${img.url}" target="_blank">🔗 Mở</a>
+          </div>`;
+      } else {
+        card.innerHTML = `
+          <div class="card-error">❌ ${escHtml(img.error || "Thất bại")}</div>
+          <div class="card-body"><div class="card-prompt">${escHtml(img.prompt)}</div></div>`;
+      }
+      grid.appendChild(card);
+    });
+  }
+
+  function clearResults() {
+    document.getElementById("resultsGrid").innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🖼️</div>
+        <div>Ảnh sẽ hiển thị ở đây sau khi tạo xong</div>
+      </div>`;
+    document.getElementById("statusBadge").textContent = "";
+    document.getElementById("statusBadge").className = "badge";
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("errorMsg");
+    el.textContent = "⚠️ " + msg;
+    el.style.display = "block";
+  }
+  function hideError() {
+    document.getElementById("errorMsg").style.display = "none";
+  }
+
+  function escHtml(s) {
+    return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+</script>
+</body>
+</html>
