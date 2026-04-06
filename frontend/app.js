@@ -425,12 +425,17 @@ function startPolling(model) {
         batchFiles.forEach(f => f.status = job.status === "done" ? "✅ Xong" : "❌ Lỗi");
         renderBatchTable();
         if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
-        // Save history to D1 - only successful images
+        // Save history to D1 - only successful images, with source file name
         if (job.images?.length) {
-          const successItems = job.images.filter(img => img.url).map(img => ({
+          const folderName = getBatchName();
+          // Map prompt index → file name
+          const promptFileMap = [];
+          const strip = n => n.replace(/\.txt$/i, "");
+          batchFiles.forEach(f => f.prompts.forEach(() => promptFileMap.push(strip(f.name))));
+          const successItems = job.images.map((img, idx) => img.url ? {
             job_id: currentJobId, prompt: img.prompt, model: model || "",
-            image_url: img.url, batch_name: getBatchName(),
-          }));
+            image_url: img.url, batch_name: folderName, file_name: promptFileMap[idx] || "",
+          } : null).filter(Boolean);
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
         }
       }
@@ -465,13 +470,16 @@ async function stopGeneration() {
 let historyPage = 0;
 let historyLoading = false;
 const HISTORY_LIMIT = 50;
-let historyView = "folders"; // "folders" | "images"
+let historyView = "folders"; // "folders" | "files" | "images"
 let historyCurrentJob = null;
+let historyCurrentFile = null;
+let historyBreadcrumb = []; // [{label, action}]
 
 async function loadHistory() {
   historyPage = 0;
   historyView = "folders";
   historyCurrentJob = null;
+  historyCurrentFile = null;
   document.getElementById("historySelectAll").checked = false;
   await fetchHistoryPage(false);
 }
@@ -483,22 +491,33 @@ async function fetchHistoryPage(append) {
   const prevBtn = document.getElementById("historyPrev");
   const nextBtn = document.getElementById("historyNext");
   const pageInfo = document.getElementById("historyPageInfo");
-  const backBtn = document.getElementById("historyBack");
 
   if (!append) grid.innerHTML = '<div class="empty-state">⏳ Đang tải...</div>';
+  updateHistoryBreadcrumb();
 
   try {
     if (historyView === "folders") {
-      backBtn.style.display = "none";
       const res = await apiFetch(`/user/history/groups?limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
       if (!res.ok) throw new Error();
       const groups = await res.json();
-      renderHistoryFolders(groups, grid);
+      renderHistoryFolders(groups, grid, "📁", g => g.batch_name || g.job_id.slice(0, 8), g => `${g.model || ""} · ${g.count} ảnh`, g => openHistoryJob(g.job_id, g.batch_name || g.job_id), g => deleteHistoryJob(g.job_id));
       prevBtn.disabled = historyPage === 0;
       nextBtn.disabled = groups.length < HISTORY_LIMIT;
+    } else if (historyView === "files") {
+      const res = await apiFetch(`/user/history/subgroups?job_id=${encodeURIComponent(historyCurrentJob)}`);
+      if (!res.ok) throw new Error();
+      const subs = await res.json();
+      // If only 1 file (or no file_name), skip to images directly
+      if (subs.length <= 1) {
+        historyView = "images";
+        historyCurrentFile = subs[0]?.file_name || "";
+        return fetchHistoryPage(false);
+      }
+      renderHistoryFolders(subs, grid, "📄", s => s.file_name || "Untitled", s => `${s.count} ảnh`, s => openHistoryFile(s.file_name), null);
+      prevBtn.disabled = true; nextBtn.disabled = true;
     } else {
-      backBtn.style.display = "";
-      const res = await apiFetch(`/user/history?job_id=${encodeURIComponent(historyCurrentJob)}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
+      const params = `job_id=${encodeURIComponent(historyCurrentJob)}&file_name=${encodeURIComponent(historyCurrentFile || "")}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`;
+      const res = await apiFetch(`/user/history?${params}`);
       if (!res.ok) throw new Error();
       const items = await res.json();
       renderHistoryGrid(items, grid, false);
@@ -513,39 +532,71 @@ async function fetchHistoryPage(append) {
   }
 }
 
-function renderHistoryFolders(groups, grid) {
+function renderHistoryFolders(items, grid, icon, getName, getMeta, onClick, onDelete) {
   grid.innerHTML = ""; grid.classList.remove("grid-mode");
-  if (!groups.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
-  groups.forEach(g => {
+  if (!items.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
+  items.forEach(g => {
     const card = document.createElement("div");
     card.className = "hist-folder";
     const time = g.created_at ? new Date(g.created_at + "Z").toLocaleString("vi-VN") : "";
+    const delBtn = onDelete ? `<button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();(${onDelete.toString()})('${esc(g.job_id || g.file_name)}')" title="Xóa">🗑</button>` : "";
     card.innerHTML = `
-      <div class="hist-folder-icon">📁</div>
+      <div class="hist-folder-icon">${icon}</div>
       <div class="hist-folder-info">
-        <div class="hist-folder-name">${esc(g.batch_name || g.job_id)}</div>
-        <div class="hist-folder-meta">${esc(g.model || "")} · ${g.count} ảnh · ${time}</div>
-      </div>
-      <button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();deleteHistoryJob('${esc(g.job_id)}')" title="Xóa">🗑</button>`;
-    card.onclick = () => openHistoryJob(g.job_id, g.batch_name || g.job_id);
+        <div class="hist-folder-name">${esc(getName(g))}</div>
+        <div class="hist-folder-meta">${esc(getMeta(g))} · ${time}</div>
+      </div>${delBtn}`;
+    card.onclick = () => onClick(g);
     grid.appendChild(card);
   });
 }
 
+function updateHistoryBreadcrumb() {
+  const el = document.getElementById("historyTitle");
+  const backBtn = document.getElementById("historyBack");
+  if (historyView === "folders") {
+    el.textContent = "📜 Lịch sử tạo ảnh";
+    backBtn.style.display = "none";
+  } else {
+    backBtn.style.display = "";
+    let parts = ["📜 Lịch sử"];
+    if (historyCurrentJob) parts.push(historyBreadcrumb[0] || "");
+    if (historyView === "images" && historyCurrentFile) parts.push(historyCurrentFile);
+    el.textContent = parts.filter(Boolean).join(" › ");
+  }
+}
+
 function openHistoryJob(jobId, name) {
-  historyView = "images";
+  historyView = "files";
   historyCurrentJob = jobId;
+  historyCurrentFile = null;
+  historyBreadcrumb = [name];
   historyPage = 0;
   document.getElementById("historySelectAll").checked = false;
-  document.getElementById("historyTitle").textContent = `📁 ${name}`;
+  fetchHistoryPage(false);
+}
+
+function openHistoryFile(fileName) {
+  historyView = "images";
+  historyCurrentFile = fileName;
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
   fetchHistoryPage(false);
 }
 
 function historyGoBack() {
-  historyView = "folders";
-  historyCurrentJob = null;
-  historyPage = 0;
-  document.getElementById("historyTitle").textContent = "📜 Lịch sử tạo ảnh";
+  if (historyView === "images" && historyCurrentFile !== null) {
+    // Go back to files level (unless it was auto-skipped)
+    historyView = "files";
+    historyCurrentFile = null;
+    historyPage = 0;
+  } else {
+    historyView = "folders";
+    historyCurrentJob = null;
+    historyCurrentFile = null;
+    historyBreadcrumb = [];
+    historyPage = 0;
+  }
   document.getElementById("historySelectAll").checked = false;
   fetchHistoryPage(false);
 }
@@ -758,19 +809,26 @@ function populateResultsTable() {
   badge.style.display = "";
   badge.textContent = `${allPrompts.length} prompt`;
 
-  tbody.innerHTML = allPrompts.map((text, i) => {
-    const imgs = rowRefImages[i] || [];
-    const refCell = imgs.length
-      ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
-      : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
-    return `<tr id="resRow${i}">
-      <td>${i + 1}</td>
-      <td><div class="prompt-cell">${esc(text)}</div></td>
-      <td style="text-align:center">${refCell}</td>
-      <td class="status-cell">⏳ Chờ</td>
-      <td style="text-align:center"><span style="color:var(--muted);font-size:0.72rem">—</span></td>
-    </tr>`;
-  }).join("");
+  let html = "", globalIdx = 0;
+  batchFiles.forEach(f => {
+    const strip = n => n.replace(/\.(txt)$/i, "");
+    html += `<tr class="file-separator"><td colspan="5">📄 ${esc(strip(f.name))} <span style="color:var(--muted);font-weight:400">(${f.prompts.length} prompt)</span></td></tr>`;
+    f.prompts.forEach((text, j) => {
+      const i = globalIdx++;
+      const imgs = rowRefImages[i] || [];
+      const refCell = imgs.length
+        ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
+        : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
+      html += `<tr id="resRow${i}">
+        <td>${i + 1}</td>
+        <td><div class="prompt-cell">${esc(text)}</div></td>
+        <td style="text-align:center">${refCell}</td>
+        <td class="status-cell">⏳ Chờ</td>
+        <td style="text-align:center"><span style="color:var(--muted);font-size:0.72rem">—</span></td>
+      </tr>`;
+    });
+  });
+  tbody.innerHTML = html;
 }
 
 function updateResultsFromJob(job) {
