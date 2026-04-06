@@ -30,10 +30,23 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
 executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
 
+PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles")
+
+def get_active_profile():
+    """Get first active profile from PROFILES_DIR, fallback to CHROME_PROFILE_PATH."""
+    d = Path(PROFILES_DIR)
+    if d.is_dir():
+        for p in sorted(d.iterdir()):
+            if p.is_dir() and not p.name.startswith("."):
+                cookies = p / "Default" / "Network" / "Cookies"
+                if cookies.exists() and cookies.stat().st_size > 0:
+                    return str(p)
+    return os.environ.get("CHROME_PROFILE_PATH")
+
 @app.on_event("startup")
 def startup_event():
     """Pre-warm Chrome CDP on startup."""
-    profile = os.environ.get("CHROME_PROFILE_PATH")
+    profile = get_active_profile()
     if profile:
         logger.info(f"Pre-warming Chrome CDP with profile: {profile}")
         try:
@@ -103,7 +116,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         if not cookies:
             raise ValueError("Cookie không hợp lệ.")
 
-        client = LabsFlowClient(cookies, profile_path=os.environ.get("CHROME_PROFILE_PATH"))
+        client = LabsFlowClient(cookies, profile_path=get_active_profile())
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token. Cookie có thể đã hết hạn.")
 
@@ -231,7 +244,7 @@ def get_recaptcha_token(req: RecaptchaRequest):
         cookies = _parse_cookie_input(req.cookie)
         if not cookies:
             return {"ok": False, "error": "Cookie không hợp lệ"}
-        client = LabsFlowClient(cookies, profile_path=os.environ.get("CHROME_PROFILE_PATH"))
+        client = LabsFlowClient(cookies, profile_path=get_active_profile())
         if not client.fetch_access_token():
             return {"ok": False, "error": client.last_error_detail or "Không lấy được access token"}
         ctx = {}
@@ -268,7 +281,19 @@ def test_cookie(req: TestCookieRequest):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "active_profile": get_active_profile()}
+
+@app.get("/profiles")
+def list_profiles():
+    d = Path(PROFILES_DIR)
+    if not d.is_dir():
+        return []
+    profiles = []
+    for p in sorted(d.iterdir()):
+        if p.is_dir() and not p.name.startswith("."):
+            cookies = p / "Default" / "Network" / "Cookies"
+            profiles.append({"name": p.name, "has_cookies": cookies.exists() and cookies.stat().st_size > 0})
+    return profiles
 
 
 @app.post("/generate", response_model=JobStatus)
