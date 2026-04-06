@@ -5,7 +5,7 @@ echo ========================================
 
 :: Start uvicorn in new window
 echo [1/2] Starting FastAPI server on port 8088...
-start "BananaPro-Server" cmd /k "cd /d C:\BananaPro\banana-pro-web\backend && set CHROME_PROFILE_PATH=C:\BananaPro\chrome_profile && set AUTO_RECAPTCHA=1 && set SELENIUM_HEADLESS=0 && uvicorn main:app --host 127.0.0.1 --port 8088"
+start "BananaPro-Server" cmd /k "cd /d C:\BananaPro\banana-pro-web\backend && set PROFILES_DIR=C:\BananaPro\chrome_profiles && set AUTO_RECAPTCHA=1 && set SELENIUM_HEADLESS=0 && uvicorn main:app --host 127.0.0.1 --port 8088"
 
 :: Wait for server to start
 echo Waiting for server to start...
