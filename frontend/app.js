@@ -241,10 +241,11 @@ function setMode(mode) {
 function loadTxtFile(input) {
   const file = input.files[0]; if (!file) return;
   document.getElementById("txtFilePath").value = file.name;
+  document.getElementById("folderTxtPath").value = "";
+  batchFiles = [];
   const reader = new FileReader();
   reader.onload = e => {
     const prompts = e.target.result.split("\n").map(s => s.trim()).filter(Boolean);
-    batchFiles = batchFiles.filter(f => f.name !== file.name);
     batchFiles.push({ name: file.name, prompts, status: "⏳ Chờ" });
     renderBatchTable();
   };
@@ -255,6 +256,8 @@ function loadFolderTxt(input) {
   const files = Array.from(input.files).filter(f => f.name.endsWith(".txt"));
   if (!files.length) return;
   document.getElementById("folderTxtPath").value = input.files[0].webkitRelativePath.split("/")[0];
+  document.getElementById("txtFilePath").value = "";
+  batchFiles = [];
   let loaded = 0;
   files.forEach(file => {
     const reader = new FileReader();
@@ -858,11 +861,9 @@ function populateResultsTable() {
         const promptIdx = batchFiles.slice(0, batchFiles.indexOf(f)).reduce((s, ff) => s + ff.prompts.length, 0) + j;
         const imgs = rowRefImages[promptIdx] || [];
         const varLabel = variants > 1 ? ` <span style="color:var(--muted);font-size:0.7rem">[${v + 1}/${variants}]</span>` : "";
-        const refCell = v === 0
-          ? (imgs.length
-            ? imgs.map((s, ri) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${promptIdx},${ri})">✕</span></span>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>`
-            : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>`)
-          : `<span style="color:var(--muted);font-size:0.7rem">—</span>`;
+        const refCell = imgs.length
+            ? imgs.map((s, ri) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${promptIdx},${ri})">✕</span></span>`).join("") + (v === 0 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>` : "")
+            : (v === 0 ? `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>` : `<span style="color:var(--muted);font-size:0.7rem">—</span>`);
         html += `<tr id="resRow${i}">
           <td>${i + 1}</td>
           <td><div class="prompt-cell">${esc(text)}${varLabel}</div></td>

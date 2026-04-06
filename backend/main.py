@@ -330,6 +330,7 @@ async def generate(req: GenerateRequest):
         raise HTTPException(400, "Cần ít nhất 1 prompt")
     if not req.cookie.strip():
         raise HTTPException(400, "Cookie không được để trống")
+    req.variants = max(1, min(4, req.variants))
 
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts) * req.variants,
