@@ -4134,16 +4134,39 @@ class LabsFlowClient:
             token_generated_at = time.time()
             self._record_token_source("playwright")
             client_context["recaptchaToken"] = token
-            # ✅ Track token timestamp
             LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
             print(f"  ✅ [Playwright] Token injected (len={len(token)}, ts={token_generated_at:.0f})")
             return True
         
-        # Cả 2 source đều fail
+        # ✅ SOURCE 3: VPS API (remote fallback)
+        vps_url = _env("VPS_RECAPTCHA_URL")
+        if vps_url:
+            print(f"  🔴 [Token] Fallback VPS API: {vps_url}...")
+            try:
+                cookie_str = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
+                resp = self.session.post(vps_url, json={"cookie": cookie_str, "action": recaptcha_action}, timeout=120)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok") and data.get("token"):
+                        token = data["token"]
+                        token_generated_at = time.time()
+                        self._record_token_source("vps_api")
+                        client_context["recaptchaToken"] = token
+                        LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
+                        print(f"  ✅ [VPS API] Token injected (len={len(token)}, ts={token_generated_at:.0f})")
+                        return True
+                    else:
+                        print(f"  ⚠️ [VPS API] Failed: {data.get('error', 'unknown')}")
+                else:
+                    print(f"  ⚠️ [VPS API] HTTP {resp.status_code}")
+            except Exception as e:
+                print(f"  ⚠️ [VPS API] Error: {e}")
+        
+        # Tất cả source đều fail
         if raise_on_fail:
-            error_msg = f"Cannot get reCAPTCHA token from both Zendriver and Playwright. {self.last_error_detail or ''}"
+            error_msg = f"Cannot get reCAPTCHA token from all sources (CDP, Playwright, VPS). {self.last_error_detail or ''}"
             self.last_error_detail = error_msg
-            print(f"  ✗ Không thể lấy token từ cả 2 source, raise exception...")
+            print(f"  ✗ Không thể lấy token từ tất cả source, raise exception...")
             raise RuntimeError(error_msg)
         
         return False

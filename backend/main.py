@@ -239,24 +239,52 @@ class RecaptchaRequest(BaseModel):
 
 @app.post("/recaptcha-token")
 def get_recaptcha_token(req: RecaptchaRequest):
-    """Lấy reCAPTCHA token từ Chrome headless trên VPS."""
+    """Lấy reCAPTCHA token từ Chrome headless trên VPS. Thử nhiều profiles."""
     try:
         cookies = _parse_cookie_input(req.cookie)
         if not cookies:
             return {"ok": False, "error": "Cookie không hợp lệ"}
-        client = LabsFlowClient(cookies, profile_path=get_active_profile())
-        if not client.fetch_access_token():
-            return {"ok": False, "error": client.last_error_detail or "Không lấy được access token"}
-        ctx = {}
-        got = client._maybe_inject_recaptcha(ctx, raise_on_fail=False, recaptcha_action=req.action)
-        if got:
-            # convert nếu cần
-            token = ctx.get("recaptchaToken")
-            if not token:
-                rc = ctx.get("recaptchaContext", {})
-                token = rc.get("token")
-            return {"ok": True, "token": token, "access_token": client.access_token}
-        return {"ok": False, "error": client.last_error_detail or "Không lấy được reCAPTCHA token"}
+
+        # Lấy danh sách profiles có cookies
+        profiles = []
+        d = Path(PROFILES_DIR)
+        if d.is_dir():
+            for p in sorted(d.iterdir()):
+                if p.is_dir() and not p.name.startswith("."):
+                    c = p / "Default" / "Network" / "Cookies"
+                    if c.exists() and c.stat().st_size > 0:
+                        profiles.append(str(p))
+        if not profiles:
+            fallback = os.environ.get("CHROME_PROFILE_PATH")
+            if fallback:
+                profiles = [fallback]
+
+        last_err = ""
+        for profile in profiles:
+            try:
+                logger.info(f"[recaptcha-token] Trying profile: {profile}")
+                client = LabsFlowClient(cookies, profile_path=profile)
+                if not client.fetch_access_token():
+                    last_err = client.last_error_detail or "Không lấy được access token"
+                    continue
+                ctx = {}
+                got = client._maybe_inject_recaptcha(ctx, raise_on_fail=False, recaptcha_action=req.action)
+                if got:
+                    token = ctx.get("recaptchaToken")
+                    if not token:
+                        rc = ctx.get("recaptchaContext", {})
+                        token = rc.get("token")
+                    if token:
+                        logger.info(f"[recaptcha-token] OK from profile: {profile}")
+                        return {"ok": True, "token": token, "access_token": client.access_token}
+                last_err = client.last_error_detail or "Không lấy được token"
+                logger.warning(f"[recaptcha-token] Failed profile {profile}: {last_err}")
+            except Exception as e:
+                last_err = str(e)
+                logger.warning(f"[recaptcha-token] Error profile {profile}: {e}")
+                continue
+
+        return {"ok": False, "error": last_err or "Tất cả profiles đều thất bại"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
