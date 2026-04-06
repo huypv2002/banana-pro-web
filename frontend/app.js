@@ -52,6 +52,15 @@ function showApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "block";
   document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
+  // Show plan status
+  const planEl = document.getElementById("planInfo");
+  if (authUser.role === "admin") { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
+  else if (authUser.plan_active) {
+    const exp = new Date(authUser.plan_expires_at);
+    const days = Math.ceil((exp - new Date()) / 86400000);
+    planEl.textContent = `📦 Còn ${days} ngày`;
+    planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active");
+  } else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   document.getElementById("navAdmin").style.display = authUser.role === "admin" ? "" : "none";
   loadCookiesFromDB();
 }
@@ -82,6 +91,8 @@ async function handleAuth(e) {
     authUser = { username: data.username, role: data.role };
     localStorage.setItem("bp_token", authToken);
     localStorage.setItem("bp_user", JSON.stringify(authUser));
+    // Fetch plan info
+    try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem("bp_user", JSON.stringify(authUser)); } } catch(_){}
     showApp();
   } catch (e) {
     errEl.textContent = "Lỗi kết nối: " + e.message;
@@ -627,20 +638,33 @@ async function loadAdminUsers() {
     const res = await apiFetch("/admin/users");
     if (!res.ok) return;
     const users = await res.json();
+    const now = new Date().toISOString();
     const tbody = document.getElementById("adminUserBody");
-    tbody.innerHTML = users.map(u => `<tr>
+    tbody.innerHTML = users.map(u => {
+      const planActive = u.role === "admin" || (u.plan_expires_at && u.plan_expires_at > now);
+      const planText = u.role === "admin" ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planClass = planActive ? "status-ok" : "status-err";
+      return `<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td>
       <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "admin" ? "disabled" : ""}>
         <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
         <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
       </select></td>
-      <td>${u.disabled ? '<span class="status-err">Bị khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
-      <td>${u.created_at || ""}</td>
-      <td>
-        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓 Mở" : "🔒 Khóa"}</button>
-        ${u.username !== "admin" ? `<button class="btn btn-red" style="padding:3px 8px;font-size:0.72rem" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
+      <td><span class="${planClass}">${planText}</span>
+        ${u.role !== "admin" ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},90)">+90d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem;color:var(--error)" onclick="adminSetPlan(${u.id},0)">Hủy</button>
+        </div>` : ""}
       </td>
-    </tr>`).join("");
+      <td>${u.disabled ? '<span class="status-err">Khóa</span>' : '<span class="status-ok">OK</span>'}</td>
+      <td>
+        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓" : "🔒"}</button>
+        ${u.username !== "admin" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">🗑</button>` : ""}
+      </td>
+    </tr>`;
+    }).join("");
   } catch (e) {}
 }
 
@@ -660,6 +684,11 @@ async function adminAddUser() {
 async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
 async function adminDelUser(id) { if (!confirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminSetPlan(id, days) {
+  if (days === 0 && !confirm("Hủy gói user này?")) return;
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  loadAdminUsers();
+}
 
 async function loadAdminHistory() {
   try {

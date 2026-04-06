@@ -208,3 +208,9 @@ textarea { resize: vertical; }
 .btn-sm { padding:4px 10px; font-size:0.75rem; }
 .btn-red { background:var(--error); color:#fff; border:none; border-radius:8px; padding:6px 14px; cursor:pointer; font-size:0.82rem; }
 .btn-red:hover { background:#b91c1c; }
+
+/* ── Plan Badge ───────────────────────────────────────────────────────────── */
+.plan-badge { font-size:0.72rem; padding:3px 10px; border-radius:20px; font-weight:600; }
+.plan-active { background:#dcfce7; color:#166534; }
+.plan-expiring { background:#fef3c7; color:#92400e; }
+.plan-expired { background:#fee2e2; color:#991b1b; }

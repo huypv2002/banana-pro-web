@@ -10,6 +10,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   role TEXT DEFAULT 'user' CHECK(role IN ('admin','user')),
   disabled INTEGER DEFAULT 0,
+  plan_expires_at TEXT DEFAULT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

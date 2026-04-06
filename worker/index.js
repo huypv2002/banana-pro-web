@@ -50,6 +50,12 @@ export default {
 async function handleGenerate(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  // Check plan
+  const u = await env.DB.prepare("SELECT role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
+  if (u.role !== "admin") {
+    if (!u.plan_expires_at || u.plan_expires_at < new Date().toISOString())
+      return err("Gói của bạn đã hết hạn. Vui lòng liên hệ admin để gia hạn.", 403);
+  }
   const body = await request.json();
   // If no cookie in body, inject from D1
   if (!body.cookie) {
@@ -197,7 +203,10 @@ async function handleLogout(request, env) {
 async function handleMe(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
-  return json({ username: user.username, role: user.role });
+  const u = await env.DB.prepare("SELECT username,role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
+  const now = new Date().toISOString();
+  const planActive = u.role === "admin" || (u.plan_expires_at && u.plan_expires_at > now);
+  return json({ username: u.username, role: u.role, plan_expires_at: u.plan_expires_at, plan_active: planActive });
 }
 
 async function handleChangePassword(request, env) {
@@ -219,7 +228,7 @@ async function handleChangePassword(request, env) {
 async function adminListUsers(request, env) {
   const [, e] = await requireAdmin(request, env);
   if (e) return e;
-  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,created_at FROM users ORDER BY id").all();
+  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at FROM users ORDER BY id").all();
   return json(results);
 }
 
@@ -247,6 +256,16 @@ async function adminUpdateUser(request, env, path) {
   if (body.role !== undefined) { sets.push("role=?"); vals.push(body.role); }
   if (body.disabled !== undefined) { sets.push("disabled=?"); vals.push(body.disabled ? 1 : 0); }
   if (body.password) { sets.push("password_hash=?"); vals.push(await sha256(body.password)); }
+  if (body.plan_days !== undefined) {
+    if (body.plan_days <= 0) { sets.push("plan_expires_at=NULL"); }
+    else {
+      // Extend from now or from current expiry if still active
+      const cur = await env.DB.prepare("SELECT plan_expires_at FROM users WHERE id=?").bind(id).first();
+      const base = (cur?.plan_expires_at && cur.plan_expires_at > new Date().toISOString()) ? new Date(cur.plan_expires_at) : new Date();
+      base.setDate(base.getDate() + body.plan_days);
+      sets.push("plan_expires_at=?"); vals.push(base.toISOString());
+    }
+  }
   if (!sets.length) return err("Không có gì để cập nhật");
   vals.push(id);
   await env.DB.prepare(`UPDATE users SET ${sets.join(",")} WHERE id=?`).bind(...vals).run();
