@@ -836,11 +836,10 @@ function updateResultsFromJob(job) {
   const allPrompts = batchFiles.flatMap(f => f.prompts);
   if (!allPrompts.length) return;
 
-  // Mark all rows based on job state
   const completed = job.completed || 0;
   const total = job.total || allPrompts.length;
 
-  // Update completed rows from images array (match by index since backend processes in order)
+  // Update completed rows from images array
   images.forEach((img, idx) => {
     const row = document.getElementById(`resRow${idx}`);
     if (!row) return;
@@ -858,8 +857,8 @@ function updateResultsFromJob(job) {
   });
 
   // Mark currently running row
-  if (job.status === "running" && images.length < total) {
-    const runIdx = images.length;
+  if (job.status === "running" && completed < total) {
+    const runIdx = completed;
     const row = document.getElementById(`resRow${runIdx}`);
     if (row && row.className !== "row-done" && row.className !== "row-error") {
       row.className = "row-running";
@@ -867,6 +866,26 @@ function updateResultsFromJob(job) {
       row.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
+
+  // Update per-file status in batch table
+  let offset = 0;
+  batchFiles.forEach((f, fi) => {
+    const fileStart = offset;
+    const fileEnd = offset + f.prompts.length;
+    offset = fileEnd;
+    const fileDone = images.slice(fileStart, fileEnd).filter(img => img).length;
+    if (fileDone >= f.prompts.length) {
+      const allOk = images.slice(fileStart, fileEnd).every(img => img && img.url);
+      f.status = allOk ? "✅ Xong" : "⚠️ Có lỗi";
+    } else if (fileDone > 0 || (completed >= fileStart && completed < fileEnd)) {
+      f.status = `🔄 ${fileDone}/${f.prompts.length}`;
+    } else if (completed >= fileEnd) {
+      f.status = "✅ Xong";
+    } else {
+      f.status = "⏳ Chờ";
+    }
+  });
+  renderBatchTable();
 }
 
 function clearResults() {
