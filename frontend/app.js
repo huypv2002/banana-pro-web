@@ -625,11 +625,12 @@ async function fetchHistoryPage(append) {
 function renderHistoryFolders(items, grid, icon, getName, getMeta, onClick, onDelete) {
   grid.innerHTML = ""; grid.classList.remove("grid-mode");
   if (!items.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
-  items.forEach(g => {
+  items.forEach((g, i) => {
     const card = document.createElement("div");
     card.className = "hist-folder";
     const time = g.created_at ? new Date(g.created_at + "Z").toLocaleString("vi-VN") : "";
-    const delBtn = onDelete ? `<button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();(${onDelete.toString()})('${esc(g.job_id || g.file_name)}')" title="Xóa">🗑</button>` : "";
+    const delId = g.job_id || g.file_name || i;
+    const delBtn = onDelete ? `<button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();deleteHistoryJob('${esc(delId)}')" title="Xóa">🗑</button>` : "";
     card.innerHTML = `
       <div class="hist-folder-icon">${icon}</div>
       <div class="hist-folder-info">
