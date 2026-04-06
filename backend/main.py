@@ -232,6 +232,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 logger.info(f"[{job_id}][w{worker_id}] Upscale {resolution}: {media_id[:20]}...")
                                 up_ok = False
                                 for up_try in range(2):
+                                    time.sleep(3)  # Delay to avoid rate limit after gen
                                     up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
                                     if up_result and up_result.get("encodedImage"):
                                         up_key = f"{job_id}_{task_idx}"
