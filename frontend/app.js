@@ -224,7 +224,6 @@ function renderCookieTable() {
 // ── Mode ──────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   currentMode = mode;
-  document.getElementById("multipleCard").style.display = mode === "multiple" ? "block" : "none";
   document.getElementById("folderStructureCard").style.display = mode === "folder" ? "block" : "none";
   document.getElementById("promptSourceCard").style.display = mode !== "folder" ? "block" : "none";
   const refDir = document.getElementById("refDirCard");
@@ -350,7 +349,7 @@ async function startGeneration() {
   if (currentMode === "normal" || currentMode === "multiple") {
     prompts = batchFiles.flatMap(f => f.prompts);
     if (!prompts.length) { showError("Vui lòng chọn file .txt có prompts."); return; }
-    reference_images = currentMode === "multiple" ? [...(refImages.subject || []), ...(refImages.scene || []), ...(refImages.style || [])] : [];
+    reference_images = [];
     // Per-prompt ref images mapping: {"0": [base64...], "2": [base64...]}
     if (currentMode !== "multiple") {
       const perPrompt = {};
