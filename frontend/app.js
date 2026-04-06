@@ -863,7 +863,7 @@ function populateResultsTable() {
         const varLabel = variants > 1 ? ` <span style="color:var(--muted);font-size:0.7rem">[${v + 1}/${variants}]</span>` : "";
         const refCell = imgs.length
             ? imgs.map((s, ri) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${promptIdx},${ri})">✕</span></span>`).join("") + (v === 0 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>` : "")
-            : (v === 0 ? `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>` : `<span style="color:var(--muted);font-size:0.7rem">—</span>`);
+            : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>`;
         html += `<tr id="resRow${i}">
           <td>${i + 1}</td>
           <td><div class="prompt-cell">${esc(text)}${varLabel}</div></td>
