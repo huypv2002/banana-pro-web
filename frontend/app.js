@@ -493,7 +493,7 @@ async function autoDownloadZip(images) {
         <p>Ảnh sẽ tự động tải về dạng ZIP khi hoàn thành.</p>
         <p><b>Để Chrome không hỏi mỗi lần tải:</b></p>
         <ol style="padding-left:18px">
-          <li>Mở <code>chrome://settings/downloads</code></li>
+          <li>Mở <a href="#" onclick="navigator.clipboard.writeText('chrome://settings/downloads');this.textContent='Đã copy!';return false" style="cursor:pointer;color:#0369a1"><code>chrome://settings/downloads</code> (bấm để copy)</a> → dán vào thanh địa chỉ</li>
           <li>Tắt <b>"Hỏi vị trí lưu mỗi tệp trước khi tải xuống"</b></li>
           <li>Nếu Chrome chặn tải nhiều file → bấm <b>Cho phép</b> trên thanh địa chỉ</li>
         </ol>
