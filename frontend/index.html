@@ -95,7 +95,7 @@
         <label>Thư mục .txt</label>
         <div class="input-btn-row">
           <input type="text" id="folderTxtPath" readonly placeholder="Chọn thư mục chứa nhiều file .txt…"/>
-          <button class="btn btn-blue" onclick="document.getElementById('folderTxtInput').click()">Chọn thư mục</button>
+          <button class="btn btn-blue" onclick="confirmFolderUpload()">Chọn thư mục</button>
           <input type="file" id="folderTxtInput" webkitdirectory style="display:none" onchange="loadFolderTxt(this)"/>
         </div>
       </div>
