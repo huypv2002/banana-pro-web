@@ -229,13 +229,21 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                             media_id = _extract_media_id(result)
                             if media_id:
                                 target = "UPSAMPLE_IMAGE_RESOLUTION_2K" if resolution == "2k" else "UPSAMPLE_IMAGE_RESOLUTION_4K"
-                                logger.info(f"[{job_id}] Upscale {resolution}: {media_id[:20]}...")
-                                up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
-                                if up_result and up_result.get("encodedImage"):
-                                    # Store base64 separately, keep original URL for thumbnail
-                                    up_key = f"{job_id}_{task_idx}"
-                                    upscaled_store[up_key] = (up_result["encodedImage"], time.time())
-                                    logger.info(f"[{job_id}] Upscale {resolution} OK ({len(up_result['encodedImage'])} chars)")
+                                logger.info(f"[{job_id}][w{worker_id}] Upscale {resolution}: {media_id[:20]}...")
+                                up_ok = False
+                                for up_try in range(2):
+                                    up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
+                                    if up_result and up_result.get("encodedImage"):
+                                        up_key = f"{job_id}_{task_idx}"
+                                        upscaled_store[up_key] = (up_result["encodedImage"], time.time())
+                                        logger.info(f"[{job_id}][w{worker_id}] Upscale OK ({len(up_result['encodedImage'])} chars)")
+                                        up_ok = True
+                                        break
+                                    else:
+                                        logger.warning(f"[{job_id}][w{worker_id}] Upscale attempt {up_try+1} failed: {client.last_error_detail}")
+                                        time.sleep(2)
+                                if not up_ok:
+                                    logger.warning(f"[{job_id}][w{worker_id}] Upscale failed after retries, keeping 1K")
                         results[task_idx] = {"prompt": prompt, "url": url, "model": model,
                                              "upscaled": f"/upscaled/{job_id}_{task_idx}" if (resolution in ("2k","4k") and f"{job_id}_{task_idx}" in upscaled_store) else None}
                     else:
