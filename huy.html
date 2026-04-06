@@ -1,0 +1,57 @@
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        textarea { width: 100%; height: 80px; margin: 10px 0; }
+        button { margin: 5px; padding: 10px 15px; cursor: pointer; }
+        .multilingual { background-color: #e3f2fd; }
+        .flash { background-color: #fff3e0; }
+        .turbo { background-color: #f3e5f5; }
+        .status { margin: 10px 0; padding: 5px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <script src="https://js.puter.com/v2/"></script>
+    
+    <h1>ElevenLabs Model Comparison</h1>
+    
+    <textarea id="text-input" placeholder="Enter text to convert to speech...">Hello! This demonstrates different ElevenLabs models. Notice the speed and quality differences between multilingual, flash, and turbo models.</textarea>
+    
+    <div>
+        <button class="multilingual" onclick="playAudio('eleven_multilingual_v2')">Multilingual V2</button>
+        <button class="flash" onclick="playAudio('eleven_flash_v2_5')">Flash V2.5</button>
+        <button class="turbo" onclick="playAudio('eleven_turbo_v2_5')">Turbo V2.5</button>
+    </div>
+    
+    <div id="status" class="status"></div>
+
+    <script>
+        const textInput = document.getElementById('text-input');
+        const statusDiv = document.getElementById('status');
+        
+        async function playAudio(model) {
+            const text = textInput.value.trim();
+            
+            if (!text) {
+                statusDiv.textContent = 'Please enter some text first!';
+                return;
+            }
+            
+            statusDiv.textContent = `Converting with ${model}...`;
+            
+            try {
+                const audio = await puter.ai.txt2speech(text, {
+                    provider: "elevenlabs",
+                    voice: "21m00Tcm4TlvDq8ikWAM",
+                    model: model
+                });
+                
+                statusDiv.textContent = `Playing ${model} audio`;
+                audio.play();
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

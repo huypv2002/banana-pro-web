@@ -325,6 +325,8 @@ async function clearUserCookies(request, env) {
 async function getHistoryGroups(request, env, url) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  // Auto-cleanup history older than 24h
+  await env.DB.prepare("DELETE FROM gen_history WHERE created_at < datetime('now','-24 hours')").run();
   const limit = parseInt(url.searchParams.get("limit") || "50");
   const offset = parseInt(url.searchParams.get("offset") || "0");
   const { results } = await env.DB.prepare(
