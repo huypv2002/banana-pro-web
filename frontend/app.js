@@ -328,7 +328,20 @@ async function startGeneration() {
   if (currentMode === "normal" || currentMode === "multiple") {
     prompts = batchFiles.flatMap(f => f.prompts);
     if (!prompts.length) { showError("Vui lòng chọn file .txt có prompts."); return; }
-    reference_images = currentMode === "multiple" ? [...(refImages.subject || []), ...(refImages.scene || []), ...(refImages.style || [])] : Object.values(rowRefImages).flat();
+    reference_images = currentMode === "multiple" ? [...(refImages.subject || []), ...(refImages.scene || []), ...(refImages.style || [])] : [];
+    // Per-prompt ref images mapping: {"0": [base64...], "2": [base64...]}
+    if (currentMode !== "multiple") {
+      const perPrompt = {};
+      let pi = 0;
+      for (const f of batchFiles) {
+        for (let j = 0; j < f.prompts.length; j++) {
+          const rowIdx = batchFiles.slice(0, batchFiles.indexOf(f)).reduce((s, ff) => s + ff.prompts.length, 0) + j;
+          if (rowRefImages[rowIdx] && rowRefImages[rowIdx].length) perPrompt[String(pi)] = rowRefImages[rowIdx];
+          pi++;
+        }
+      }
+      if (Object.keys(perPrompt).length) folder_images.__per_prompt_ref = perPrompt;
+    }
   } else if (currentMode === "folder") {
     const entries = Object.entries(folderStructure);
     if (!entries.length) { showError("Vui lòng chọn folder cha."); return; }

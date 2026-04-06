@@ -136,8 +136,31 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                 if job.get("cancelled"):
                     break
                 try:
+                    # Global ref images chỉ cho prompt đầu (multiple mode)
+                    image_inputs = list(global_image_inputs) if idx == 0 and global_image_inputs else []
+
+                    # Per-prompt ref images (normal mode)
+                    per_prompt_ref = (folder_images or {}).get("__per_prompt_ref", {})
+                    per_imgs = per_prompt_ref.get(str(idx), [])
+                    if per_imgs:
+                        for b64 in per_imgs[:3]:
+                            try:
+                                import tempfile, base64 as _b64
+                                header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
+                                ext = 'jpg'
+                                if 'png' in header: ext = 'png'
+                                elif 'webp' in header: ext = 'webp'
+                                with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
+                                    f.write(_b64.b64decode(data))
+                                    tmp_path = f.name
+                                media_id = client.upload_image(tmp_path)
+                                os.unlink(tmp_path)
+                                if media_id:
+                                    image_inputs.append({"name": media_id.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
+                            except Exception:
+                                pass
+
                     # Folder structure: match ảnh theo tên prompt
-                    image_inputs = list(global_image_inputs) if idx == 0 else []
                     if folder_images:
                         key = prompt.strip().lower()[:30]
                         for fname, imgs in folder_images.items():
