@@ -485,6 +485,25 @@ function startPolling(model) {
 }
 
 async function autoDownloadZip(images) {
+  // Show download setup guide once
+  if (!localStorage.getItem("bp_dl_guide")) {
+    await Swal.fire({
+      title: "📥 Tự động tải ảnh",
+      html: `<div style="text-align:left;font-size:0.88rem;line-height:1.6">
+        <p>Ảnh sẽ tự động tải về dạng ZIP khi hoàn thành.</p>
+        <p><b>Để Chrome không hỏi mỗi lần tải:</b></p>
+        <ol style="padding-left:18px">
+          <li>Mở <code>chrome://settings/downloads</code></li>
+          <li>Tắt <b>"Hỏi vị trí lưu mỗi tệp trước khi tải xuống"</b></li>
+          <li>Nếu Chrome chặn tải nhiều file → bấm <b>Cho phép</b> trên thanh địa chỉ</li>
+        </ol>
+      </div>`,
+      icon: "info",
+      confirmButtonColor: "#16a34a",
+      confirmButtonText: "Đã hiểu!",
+    });
+    localStorage.setItem("bp_dl_guide", "1");
+  }
   const items = images.filter(img => img && (img.url || img.upscaled));
   if (!items.length) return;
   try {
