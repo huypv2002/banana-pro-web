@@ -408,13 +408,24 @@ function startPolling(model) {
         if (job.images?.length) {
           const successItems = job.images.filter(img => img.url).map(img => ({
             job_id: currentJobId, prompt: img.prompt, model: model || "",
-            image_url: img.url, batch_name: batchFiles.map(f => f.name).join(", ") || "Untitled",
+            image_url: img.url, batch_name: getBatchName(),
           }));
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
         }
       }
     } catch (e) {}
   }, 2000);
+}
+
+function getBatchName() {
+  const strip = n => n.replace(/\.(txt|png|jpg|jpeg|webp)$/i, "");
+  if (currentMode === "folder") {
+    const subs = Object.keys(folderStructure);
+    if (subs.length === 1) return subs[0];
+    return subs.length ? subs.join(", ") : "Folder";
+  }
+  const names = batchFiles.map(f => strip(f.name));
+  return names.length ? names.join(", ") : "Untitled";
 }
 
 function togglePause() { paused = !paused; document.getElementById("pauseBtn").textContent = paused ? "▶ TIẾP TỤC" : "⏸ TẠM DỪNG"; }
