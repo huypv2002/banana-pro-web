@@ -6800,10 +6800,11 @@ class LabsFlowClient:
                 "sessionId": session_id or f";{int(time.time() * 1000)}",
                 "projectId": project_id or self.flow_project_id or "",
                 "tool": "PINHOLE",
+                "userPaygateTier": "PAYGATE_TIER_TWO",
             }
             try:
                 self._maybe_inject_recaptcha(client_context, raise_on_fail=True, recaptcha_action="IMAGE_GENERATION")
-                # ✅ Delay nhỏ sau khi có token để Google Labs validate token (tránh 403 lần đầu)
+                self._convert_to_recaptcha_context(client_context)
                 time.sleep(0.5)
             except RuntimeError as e:
                 self.last_error_detail = str(e)

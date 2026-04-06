@@ -70,6 +70,7 @@ class GenerateRequest(BaseModel):
     model: str = "NARWHAL"
     aspect_ratio: str = "16:9"
     variants: int = 1
+    resolution: str = "1k"             # 1k | 2k | 4k
     reference_images: List[str] = []   # base64 images cho Image-to-Image
     folder_images: dict = {}           # {name: [base64...]} cho Folder Structure
 
@@ -105,8 +106,19 @@ def _extract_image_url(result: dict) -> str:
     return ""
 
 
+def _extract_media_id(result: dict) -> str:
+    try:
+        media = result.get("media") or []
+        if media:
+            return media[0].get("name") or media[0].get("image", {}).get("generatedImage", {}).get("mediaId") or ""
+    except Exception:
+        pass
+    return ""
+
+
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     model: str, aspect_ratio: str, variants: int,
+                    resolution: str = "1k",
                     reference_images: list = None, folder_images: dict = None):
     import threading, queue as _queue, random
     job = jobs[job_id]
@@ -204,6 +216,17 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     result = client.generate_flow_images([request_item], project_id=project_id)
                     if result:
                         url = _extract_image_url(result)
+                        # Upsample if 2k/4k
+                        if url and resolution in ("2k", "4k"):
+                            media_id = _extract_media_id(result)
+                            if media_id:
+                                target = "UPSAMPLE_IMAGE_RESOLUTION_2K" if resolution == "2k" else "UPSAMPLE_IMAGE_RESOLUTION_4K"
+                                logger.info(f"[{job_id}] Upscale {resolution}: {media_id[:20]}...")
+                                up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
+                                if up_result:
+                                    up_url = _extract_image_url(up_result)
+                                    if up_url:
+                                        url = up_url
                         results[task_idx] = {"prompt": prompt, "url": url, "model": model}
                     else:
                         results[task_idx] = {"prompt": prompt, "url": None,
@@ -351,7 +374,7 @@ async def generate(req: GenerateRequest):
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_generation,
                          job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
-                         req.reference_images or [], req.folder_images or {})
+                         req.resolution, req.reference_images or [], req.folder_images or {})
 
     return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 

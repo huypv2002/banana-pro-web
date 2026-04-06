@@ -408,7 +408,8 @@ async function startGeneration() {
   hideError(); setLoading(true); populateResultsTable(); paused = false;
 
   try {
-    const body = { prompts, model, aspect_ratio, variants };
+    const resolution = document.getElementById("resolutionSelect").value;
+    const body = { prompts, model, aspect_ratio, variants, resolution };
     if (reference_images.length) body.reference_images = reference_images;
     if (Object.keys(folder_images).length) body.folder_images = folder_images;
 
