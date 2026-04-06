@@ -335,6 +335,17 @@ function renderFolderStructureTable() {
 async function startGeneration() {
   if (!cookies.length) { showError("Vui lòng thêm cookie trong mục Quản lý Cookie."); return; }
 
+  // Warn if cookie is older than 10 hours
+  const oldest = cookies.reduce((min, c) => {
+    const t = c.created_at ? new Date(c.created_at + "Z").getTime() : 0;
+    return t && t < min ? t : min;
+  }, Date.now());
+  const hoursAgo = Math.floor((Date.now() - oldest) / 3600000);
+  if (hoursAgo >= 10) {
+    const ok = confirm(`⚠️ Cookie đã được thêm ${hoursAgo} giờ trước.\n\nCookie chỉ có hạn 10–24 giờ, có thể đã hết hạn.\nBạn nên lấy cookie mới trước khi tạo ảnh.\n\nBấm OK để tiếp tục, Cancel để dừng lại.`);
+    if (!ok) return;
+  }
+
   let prompts = [], reference_images = [], folder_images = {};
   if (currentMode === "normal" || currentMode === "multiple") {
     prompts = batchFiles.flatMap(f => f.prompts);
