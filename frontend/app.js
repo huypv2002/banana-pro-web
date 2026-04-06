@@ -947,7 +947,7 @@ function updateResultsFromJob(job) {
       row.className = "row-done";
       cells[3].innerHTML = '<span class="status-ok">✅ Xong</span>';
       cells[4].innerHTML = `<img src="${img.url}" class="result-thumb" onclick="window.open(this.src)" onerror="this.outerHTML='❌'"/>
-        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a>${img.upscaled ? ` <a href="${API_BASE}${img.upscaled}" download>⬇${img.upscaled.includes('4k') ? '4K' : '2K'}</a>` : ""}</div>`;
+        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a>${img.upscaled ? ` <a href="${API_BASE}${img.upscaled}" download>⬇${document.getElementById("resolutionSelect")?.value?.toUpperCase() || "HD"}</a>` : ""}</div>`;
     } else {
       row.className = "row-error";
       cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';
