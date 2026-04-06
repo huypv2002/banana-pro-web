@@ -109,7 +109,6 @@ async function startGeneration() {
   const prompts = batchFiles.flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
   const model = document.getElementById("modelSelect").value;
-  const aspect_ratio = document.getElementById("aspectSelect").value;
   const num_videos = parseInt(document.getElementById("numVideosInput").value) || 1;
 
   document.getElementById("progressSection").style.display = "block";
@@ -118,7 +117,7 @@ async function startGeneration() {
   populateResultsTable();
 
   try {
-    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify({ prompts, model, aspect_ratio, num_videos }) });
+    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify({ prompts, model, num_videos }) });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
     currentJobId = job.job_id;

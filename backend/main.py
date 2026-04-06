@@ -429,9 +429,14 @@ def cancel_job(job_id: str):
 # ── Video Generation ──────────────────────────────────────────────────────────
 
 VIDEO_MODEL_MAP = {
-    "veo3": "veo_3_generate_s_fast",
-    "veo3_ultra": "veo_3_generate_s_fast_ultra",
-    "veo2": "veo_2_generate_s_fast",
+    # Landscape (16:9)
+    "low_fast_16_9": "veo_3_1_t2v_fast_ultra_relaxed",       # 0 credits
+    "fast_16_9": "veo_3_1_t2v_fast_ultra",                   # 10 credits
+    "quality_16_9": "veo_3_1_t2v",                            # 100 credits
+    # Portrait (9:16)
+    "low_fast_9_16": "veo_3_1_t2v_fast_portrait_ultra_relaxed",  # 0 credits
+    "fast_9_16": "veo_3_1_t2v_fast_portrait_ultra",              # 10 credits
+    "quality_9_16": "veo_3_1_t2v_portrait",                      # 100 credits
 }
 
 VIDEO_ASPECT_MAP = {
@@ -443,9 +448,8 @@ VIDEO_ASPECT_MAP = {
 class VideoGenerateRequest(BaseModel):
     cookie: str = ""
     prompts: List[str]
-    model: str = "veo3"
-    aspect_ratio: str = "16:9"
-    num_videos: int = 1  # per prompt
+    model: str = "fast_16_9"
+    num_videos: int = 1
 
 @app.post("/generate-video")
 async def generate_video(req: VideoGenerateRequest):
@@ -457,7 +461,7 @@ async def generate_video(req: VideoGenerateRequest):
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_video_generation,
-                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.num_videos)
+                         job_id, req.cookie, req.prompts, req.model, req.num_videos)
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 @app.get("/video-jobs/{job_id}")
@@ -470,7 +474,7 @@ def get_video_job(job_id: str):
 
 
 def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
-                          model: str, aspect_ratio: str, num_videos: int):
+                          model: str, num_videos: int):
     job = jobs[job_id]
     job["status"] = "running"
     logger.info(f"[VIDEO {job_id}] prompts={len(prompts)}, model={model}, num_videos={num_videos}")
@@ -483,8 +487,9 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             raise ValueError("Không thể lấy access token.")
 
         project_id = client.flow_project_id
-        model_key = VIDEO_MODEL_MAP.get(model, "veo_3_generate_s_fast")
-        aspect = VIDEO_ASPECT_MAP.get(aspect_ratio, "VIDEO_ASPECT_RATIO_LANDSCAPE")
+        model_key = VIDEO_MODEL_MAP.get(model, "veo_3_1_t2v_fast_ultra")
+        # Derive aspect from model key
+        aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "portrait" in model_key else "VIDEO_ASPECT_RATIO_LANDSCAPE"
 
         for idx, prompt in enumerate(prompts):
             if job.get("cancelled"):

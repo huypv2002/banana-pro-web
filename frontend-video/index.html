@@ -51,14 +51,16 @@
     <div class="settings-grid">
       <label>Model</label>
       <select id="modelSelect">
-        <option value="veo3">Veo 3</option>
-        <option value="veo3_ultra">Veo 3 Ultra</option>
-        <option value="veo2">Veo 2</option>
-      </select>
-      <label>Tỷ lệ</label>
-      <select id="aspectSelect">
-        <option value="16:9">16:9 Ngang</option>
-        <option value="9:16">9:16 Dọc</option>
+        <optgroup label="Landscape (16:9)">
+          <option value="low_fast_16_9">Low Fast (16:9) - 0 credits</option>
+          <option value="fast_16_9" selected>Fast (16:9) - 10 credits</option>
+          <option value="quality_16_9">Quality (16:9) - 100 credits</option>
+        </optgroup>
+        <optgroup label="Portrait (9:16)">
+          <option value="low_fast_9_16">Low Fast (9:16) - 0 credits</option>
+          <option value="fast_9_16">Fast (9:16) - 10 credits</option>
+          <option value="quality_9_16">Quality (9:16) - 100 credits</option>
+        </optgroup>
       </select>
       <label>Số video / prompt</label>
       <input type="number" id="numVideosInput" value="1" min="1" max="4"/>
