@@ -1580,7 +1580,7 @@ class LabsFlowClient:
                 # Mở profile bằng persistent context (headless)
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=str(profile_dir),
-                    headless=True,
+                    headless=False,
                     channel="chrome",
                     args=[
                         '--no-first-run',
@@ -1875,7 +1875,7 @@ class LabsFlowClient:
                 # Mở browser headless với profile
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=str(profile_dir),
-                    headless=True,
+                    headless=False,
                     channel="chrome",
                     args=[
                         '--no-first-run',
