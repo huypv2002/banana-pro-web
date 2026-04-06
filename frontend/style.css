@@ -217,3 +217,8 @@ textarea { resize: vertical; }
 
 /* ── File Separator in Results Table ──────────────────────────────────────── */
 .file-separator td { background:#e0f2fe; font-weight:600; font-size:0.82rem; color:#0369a1; padding:8px 12px !important; border-bottom:2px solid #7dd3fc; }
+
+/* ── Ref Image Delete Button ──────────────────────────────────────────────── */
+.ref-wrap { position:relative; display:inline-block; margin:2px; }
+.ref-del { position:absolute; top:-4px; right:-4px; background:#dc2626; color:#fff; border-radius:50%; width:16px; height:16px; font-size:10px; line-height:16px; text-align:center; cursor:pointer; display:none; }
+.ref-wrap:hover .ref-del { display:block; }

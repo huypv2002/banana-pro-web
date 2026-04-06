@@ -315,9 +315,14 @@ function refreshRefCells() {
     const row = document.getElementById(`resRow${i}`); if (!row) return;
     const imgs = rowRefImages[i] || [];
     row.cells[2].innerHTML = imgs.length
-      ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
+      ? imgs.map((s, j) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i},${j})">✕</span></span>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
       : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
   });
+}
+
+function removeRefImg(row, idx) {
+  if (rowRefImages[row]) { rowRefImages[row].splice(idx, 1); if (!rowRefImages[row].length) delete rowRefImages[row]; }
+  refreshRefCells();
 }
 
 function loadParentFolder(input) {
@@ -855,7 +860,7 @@ function populateResultsTable() {
         const varLabel = variants > 1 ? ` <span style="color:var(--muted);font-size:0.7rem">[${v + 1}/${variants}]</span>` : "";
         const refCell = v === 0
           ? (imgs.length
-            ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>`
+            ? imgs.map((s, ri) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${promptIdx},${ri})">✕</span></span>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>`
             : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>`)
           : `<span style="color:var(--muted);font-size:0.7rem">—</span>`;
         html += `<tr id="resRow${i}">
