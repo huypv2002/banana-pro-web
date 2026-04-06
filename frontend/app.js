@@ -416,12 +416,25 @@ async function startGeneration() {
   }
 }
 
+let pollFailCount = 0;
+
 function startPolling(model) {
+  pollFailCount = 0;
   pollInterval = setInterval(async () => {
     if (!currentJobId || paused) return;
     try {
       const res = await apiFetch(`/jobs/${currentJobId}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        pollFailCount++;
+        if (pollFailCount >= 5) {
+          clearInterval(pollInterval);
+          currentJobId = null;
+          setLoading(false);
+          showError("Mất kết nối tới server. Vui lòng thử lại.");
+        }
+        return;
+      }
+      pollFailCount = 0;
       const job = await res.json();
       updateProgress(job);
       updateResultsFromJob(job);
@@ -434,7 +447,6 @@ function startPolling(model) {
         // Save history to D1 - only successful images, with source file name
         if (job.images?.length) {
           const folderName = getBatchName();
-          // Map image index → file name (accounting for variants)
           const promptFileMap = [];
           const strip = n => n.replace(/\.txt$/i, "");
           const imgVariants = job.total > 0 && batchFiles.flatMap(f => f.prompts).length > 0
@@ -449,7 +461,15 @@ function startPolling(model) {
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      pollFailCount++;
+      if (pollFailCount >= 5) {
+        clearInterval(pollInterval);
+        currentJobId = null;
+        setLoading(false);
+        showError("Mất kết nối tới server. Vui lòng thử lại.");
+      }
+    }
   }, 2000);
 }
 
