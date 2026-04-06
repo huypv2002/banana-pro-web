@@ -468,6 +468,8 @@ function startPolling(model) {
             image_url: img.url, batch_name: folderName, file_name: promptFileMap[idx] || "",
           } : null).filter(Boolean);
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
+          // Auto download ZIP
+          autoDownloadZip(job.images);
         }
       }
     } catch (e) {
@@ -480,6 +482,35 @@ function startPolling(model) {
       }
     }
   }, 2000);
+}
+
+async function autoDownloadZip(images) {
+  const items = images.filter(img => img && (img.url || img.upscaled));
+  if (!items.length) return;
+  try {
+    if (!window.JSZip) {
+      await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+    }
+    const zip = new JSZip(); let idx = 0;
+    for (const img of items) {
+      try {
+        const dlUrl = img.upscaled || img.url;
+        const isRelative = dlUrl.startsWith("/");
+        const resp = await fetch(isRelative ? API_BASE + dlUrl : dlUrl);
+        const blob = await resp.blob();
+        const ext = blob.type?.includes("png") ? "png" : "jpg";
+        zip.file(`${String(++idx).padStart(3, "0")}.${ext}`, blob);
+      } catch (e) { console.warn("Skip:", e); }
+    }
+    if (!idx) return;
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content);
+    a.download = `${getBatchName()}_${new Date().toISOString().slice(0,10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    sSuccess(`Đã tải ${idx} ảnh (ZIP)`);
+  } catch (e) { console.error("Auto ZIP failed:", e); }
 }
 
 function getBatchName() {
@@ -897,7 +928,7 @@ function updateResultsFromJob(job) {
       row.className = "row-done";
       cells[3].innerHTML = '<span class="status-ok">✅ Xong</span>';
       cells[4].innerHTML = `<img src="${img.url}" class="result-thumb" onclick="window.open(this.src)" onerror="this.outerHTML='❌'"/>
-        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a></div>`;
+        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a>${img.upscaled ? ` <a href="${API_BASE}${img.upscaled}" download>⬇${img.upscaled.includes('4k') ? '4K' : '2K'}</a>` : ""}</div>`;
     } else {
       row.className = "row-error";
       cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';

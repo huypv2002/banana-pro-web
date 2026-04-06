@@ -13,7 +13,6 @@ os.environ["RECAPTCHA_MODE"] = "selenium"
 os.environ["SELENIUM_HEADLESS"] = "0"
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -27,11 +26,10 @@ app = FastAPI(title="Banana Pro API", version="1.0.0")
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
-Path("upscaled").mkdir(exist_ok=True)
-app.mount("/upscaled", StaticFiles(directory="upscaled"), name="upscaled")
 
 executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
+upscaled_store: dict = {}  # {job_id_idx: base64_string}
 
 PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
 
@@ -227,15 +225,12 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 logger.info(f"[{job_id}] Upscale {resolution}: {media_id[:20]}...")
                                 up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
                                 if up_result and up_result.get("encodedImage"):
-                                    import base64 as _b64
-                                    img_data = _b64.b64decode(up_result["encodedImage"])
-                                    fname = f"{media_id}_{resolution}.jpg"
-                                    fpath = Path("upscaled") / fname
-                                    fpath.parent.mkdir(exist_ok=True)
-                                    fpath.write_bytes(img_data)
-                                    url = f"/upscaled/{fname}"
-                                    logger.info(f"[{job_id}] Upscale {resolution} OK: {len(img_data)} bytes → {fname}")
-                        results[task_idx] = {"prompt": prompt, "url": url, "model": model}
+                                    # Store base64 separately, keep original URL for thumbnail
+                                    up_key = f"{job_id}_{task_idx}"
+                                    upscaled_store[up_key] = up_result["encodedImage"]
+                                    logger.info(f"[{job_id}] Upscale {resolution} OK ({len(up_result['encodedImage'])} chars)")
+                        results[task_idx] = {"prompt": prompt, "url": url, "model": model,
+                                             "upscaled": f"/upscaled/{job_id}_{task_idx}" if (resolution in ("2k","4k") and f"{job_id}_{task_idx}" in upscaled_store) else None}
                     else:
                         results[task_idx] = {"prompt": prompt, "url": None,
                                              "error": client.last_error_detail or "Tạo ảnh thất bại"}
@@ -353,6 +348,16 @@ def test_cookie(req: TestCookieRequest):
 @app.get("/health")
 def health():
     return {"ok": True, "active_profile": get_active_profile()}
+
+@app.get("/upscaled/{key}")
+def get_upscaled(key: str):
+    from fastapi.responses import Response
+    import base64 as _b64
+    data = upscaled_store.get(key)
+    if not data:
+        raise HTTPException(404, "Not found")
+    return Response(content=_b64.b64decode(data), media_type="image/jpeg",
+                    headers={"Content-Disposition": f"attachment; filename={key}.jpg"})
 
 @app.get("/profiles")
 def list_profiles():
