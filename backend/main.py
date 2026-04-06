@@ -429,20 +429,35 @@ def cancel_job(job_id: str):
 # ── Video Generation ──────────────────────────────────────────────────────────
 
 VIDEO_MODEL_MAP = {
-    # Landscape (16:9)
-    "low_fast_16_9": "veo_3_1_t2v_fast_ultra_relaxed",       # 0 credits
-    "fast_16_9": "veo_3_1_t2v_fast_ultra",                   # 10 credits
-    "quality_16_9": "veo_3_1_t2v",                            # 100 credits
-    # Portrait (9:16)
-    "low_fast_9_16": "veo_3_1_t2v_fast_portrait_ultra_relaxed",  # 0 credits
-    "fast_9_16": "veo_3_1_t2v_fast_portrait_ultra",              # 10 credits
-    "quality_9_16": "veo_3_1_t2v_portrait",                      # 100 credits
+    # T2V Landscape (16:9)
+    "t2v_low_16_9":     "veo_3_1_t2v_fast_ultra_relaxed",
+    "t2v_fast_16_9":    "veo_3_1_t2v_fast_ultra",
+    "t2v_quality_16_9": "veo_3_1_t2v",
+    # T2V Portrait (9:16)
+    "t2v_low_9_16":     "veo_3_1_t2v_fast_portrait_ultra_relaxed",
+    "t2v_fast_9_16":    "veo_3_1_t2v_fast_portrait_ultra",
+    "t2v_quality_9_16": "veo_3_1_t2v_portrait",
+    # Legacy keys (backward compat)
+    "low_fast_16_9":    "veo_3_1_t2v_fast_ultra_relaxed",
+    "fast_16_9":        "veo_3_1_t2v_fast_ultra",
+    "quality_16_9":     "veo_3_1_t2v",
+    "low_fast_9_16":    "veo_3_1_t2v_fast_portrait_ultra_relaxed",
+    "fast_9_16":        "veo_3_1_t2v_fast_portrait_ultra",
+    "quality_9_16":     "veo_3_1_t2v_portrait",
 }
 
-VIDEO_ASPECT_MAP = {
-    "16:9": "VIDEO_ASPECT_RATIO_LANDSCAPE",
-    "9:16": "VIDEO_ASPECT_RATIO_PORTRAIT",
-    "1:1": "VIDEO_ASPECT_RATIO_SQUARE",
+VIDEO_I2V_MODEL_MAP = {
+    # I2V single image — Landscape
+    "i2v_low_16_9":     "veo_3_1_i2v_s_fast_ultra_relaxed",
+    "i2v_fast_16_9":    "veo_3_1_i2v_s_fast_ultra",
+    "i2v_quality_16_9": "veo_3_1_i2v_s",
+    # I2V single image — Portrait
+    "i2v_low_9_16":     "veo_3_1_i2v_s_fast_portrait_ultra_relaxed",
+    "i2v_fast_9_16":    "veo_3_1_i2v_s_fast_portrait_ultra",
+    "i2v_quality_9_16": "veo_3_1_i2v_s_portrait",
+    # Legacy keys
+    "fast_i2v":         "veo_3_1_i2v_s_fast_ultra",
+    "quality_i2v":      "veo_3_1_i2v_s",
 }
 
 class VideoGenerateRequest(BaseModel):
@@ -525,7 +540,6 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         project_id = client.flow_project_id
         t2v_key = VIDEO_MODEL_MAP.get(t2v_model, "veo_3_1_t2v_fast_ultra")
         i2v_key = VIDEO_I2V_MODEL_MAP.get(i2v_model, "veo_3_1_i2v_s_fast_ultra")
-
         for idx, prompt in enumerate(prompts):
             if job.get("cancelled"):
                 break
