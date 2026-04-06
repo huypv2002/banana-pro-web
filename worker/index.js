@@ -39,6 +39,7 @@ export default {
 
     // ── Generate with auto-inject cookie from D1 ──
     if (path === "/generate" && request.method === "POST") return handleGenerate(request, env);
+    if (path === "/generate-video" && request.method === "POST") return handleGenerate(request, env, "/generate-video");
 
     // ── reCAPTCHA token (auto-inject cookie) ──
     if (path === "/recaptcha-token" && request.method === "POST") return handleRecaptchaToken(request, env);
@@ -48,7 +49,7 @@ export default {
   }
 };
 
-async function handleGenerate(request, env) {
+async function handleGenerate(request, env, vpsPath = "/generate") {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
   // Check plan
@@ -66,7 +67,7 @@ async function handleGenerate(request, env) {
   }
   // Proxy to VPS
   try {
-    const resp = await fetch(VPS + "/generate", {
+    const resp = await fetch(VPS + vpsPath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

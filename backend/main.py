@@ -424,3 +424,120 @@ def cancel_job(job_id: str):
         raise HTTPException(404, "Job không tồn tại")
     job["cancelled"] = True
     return {"ok": True}
+
+
+# ── Video Generation ──────────────────────────────────────────────────────────
+
+VIDEO_MODEL_MAP = {
+    "veo3": "veo_3_generate_s_fast",
+    "veo3_ultra": "veo_3_generate_s_fast_ultra",
+    "veo2": "veo_2_generate_s_fast",
+}
+
+VIDEO_ASPECT_MAP = {
+    "16:9": "VIDEO_ASPECT_RATIO_LANDSCAPE",
+    "9:16": "VIDEO_ASPECT_RATIO_PORTRAIT",
+    "1:1": "VIDEO_ASPECT_RATIO_SQUARE",
+}
+
+class VideoGenerateRequest(BaseModel):
+    cookie: str = ""
+    prompts: List[str]
+    model: str = "veo3"
+    aspect_ratio: str = "16:9"
+    num_videos: int = 1  # per prompt
+
+@app.post("/generate-video")
+async def generate_video(req: VideoGenerateRequest):
+    if not req.prompts:
+        raise HTTPException(400, "Cần ít nhất 1 prompt")
+    req.num_videos = max(1, min(4, req.num_videos))
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "total": len(req.prompts),
+                    "completed": 0, "videos": [], "error": None, "cancelled": False}
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _run_video_generation,
+                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.num_videos)
+    return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
+
+@app.get("/video-jobs/{job_id}")
+def get_video_job(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job không tồn tại")
+    return {"job_id": job_id, "status": job["status"], "total": job["total"],
+            "completed": job["completed"], "videos": job.get("videos", []), "error": job.get("error")}
+
+
+def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
+                          model: str, aspect_ratio: str, num_videos: int):
+    job = jobs[job_id]
+    job["status"] = "running"
+    logger.info(f"[VIDEO {job_id}] prompts={len(prompts)}, model={model}, num_videos={num_videos}")
+    try:
+        cookies = _parse_cookie_input(cookie)
+        if not cookies:
+            raise ValueError("Cookie không hợp lệ.")
+        client = LabsFlowClient(cookies, profile_path=get_active_profile())
+        if not client.fetch_access_token():
+            raise ValueError("Không thể lấy access token.")
+
+        project_id = client.flow_project_id
+        model_key = VIDEO_MODEL_MAP.get(model, "veo_3_generate_s_fast")
+        aspect = VIDEO_ASPECT_MAP.get(aspect_ratio, "VIDEO_ASPECT_RATIO_LANDSCAPE")
+
+        for idx, prompt in enumerate(prompts):
+            if job.get("cancelled"):
+                break
+            try:
+                logger.info(f"[VIDEO {job_id}] [{idx+1}/{len(prompts)}] Generating: {prompt[:50]}...")
+                result = client.generate_videos(
+                    project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
+                    prompt=prompt, model_key=model_key, num_videos=num_videos, aspect_ratio=aspect,
+                )
+                if result:
+                    # Poll for completion
+                    operations = result if isinstance(result, list) else [result]
+                    video_urls = _poll_video_status(client, operations, job_id, idx)
+                    job["videos"].append({"prompt": prompt, "urls": video_urls, "model": model})
+                else:
+                    job["videos"].append({"prompt": prompt, "urls": [], "error": client.last_error_detail or "Tạo video thất bại"})
+            except Exception as e:
+                job["videos"].append({"prompt": prompt, "urls": [], "error": str(e)})
+            finally:
+                job["completed"] += 1
+
+        job["status"] = "done"
+    except Exception as e:
+        logger.error(f"[VIDEO {job_id}] Fatal: {e}")
+        job["status"] = "error"
+        job["error"] = str(e)
+
+
+def _poll_video_status(client, operations, job_id, prompt_idx, max_wait=600):
+    """Poll video generation status until done or timeout."""
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            status = client.check_video_status(operations)
+            if not status:
+                time.sleep(10)
+                continue
+            ops = status.get("operations", [])
+            all_done = all(op.get("done", False) for op in ops)
+            if all_done:
+                urls = []
+                for op in ops:
+                    resp = op.get("response", {})
+                    videos = resp.get("generatedVideos", [])
+                    for v in videos:
+                        url = v.get("video", {}).get("uri") or v.get("video", {}).get("videoUri") or ""
+                        if url:
+                            urls.append(url)
+                logger.info(f"[VIDEO {job_id}][{prompt_idx}] Done: {len(urls)} videos")
+                return urls
+        except Exception as e:
+            logger.warning(f"[VIDEO {job_id}][{prompt_idx}] Poll error: {e}")
+        time.sleep(10)
+    logger.warning(f"[VIDEO {job_id}][{prompt_idx}] Timeout after {max_wait}s")
+    return []

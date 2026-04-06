@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Banana Pro Video – Tạo Video AI</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>"/>
+  <link rel="stylesheet" href="style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">🎬</div>
+    <h2>Banana Pro Video</h2>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">Đăng nhập</button>
+      <button class="auth-tab" onclick="switchAuthTab('register')">Đăng ký</button>
+    </div>
+    <form onsubmit="return handleAuth(event)">
+      <input type="text" id="authUsername" placeholder="Username" required/>
+      <input type="password" id="authPassword" placeholder="Password" required/>
+      <button type="submit" class="btn btn-primary" style="width:100%">Đăng nhập</button>
+    </form>
+    <div id="authError" class="auth-error" style="display:none"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appScreen" style="display:none">
+<header class="header">
+  <div class="header-left">
+    <span class="logo">🎬</span>
+    <span class="app-name">Banana Pro Video</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="userInfo" class="user-info"></span>
+    <span id="planInfo" class="plan-badge"></span>
+    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
+    <button class="btn btn-ghost" onclick="logout()">🚪</button>
+  </div>
+</header>
+
+<div class="main-layout">
+<!-- LEFT PANEL -->
+<div class="left-panel">
+  <div class="card">
+    <div class="card-title">⚙️ Cài đặt</div>
+    <div class="settings-grid">
+      <label>Model</label>
+      <select id="modelSelect">
+        <option value="veo3">Veo 3</option>
+        <option value="veo3_ultra">Veo 3 Ultra</option>
+        <option value="veo2">Veo 2</option>
+      </select>
+      <label>Tỷ lệ</label>
+      <select id="aspectSelect">
+        <option value="16:9">16:9 Ngang</option>
+        <option value="9:16">9:16 Dọc</option>
+      </select>
+      <label>Số video / prompt</label>
+      <input type="number" id="numVideosInput" value="1" min="1" max="4"/>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📄 Nguồn prompt (.txt)</div>
+    <div class="field-row">
+      <label>File .txt</label>
+      <div class="input-btn-row">
+        <input type="text" id="txtFilePath" readonly placeholder="Chọn file .txt…"/>
+        <button class="btn btn-blue" onclick="document.getElementById('txtFileInput').click()">Chọn file</button>
+        <input type="file" id="txtFileInput" accept=".txt" style="display:none" onchange="loadTxtFile(this)"/>
+      </div>
+    </div>
+    <div class="field-row" style="margin-top:8px">
+      <label>Hoặc chọn thư mục</label>
+      <div class="input-btn-row">
+        <input type="text" id="folderTxtPath" readonly placeholder="Chọn thư mục chứa .txt…"/>
+        <button class="btn btn-blue" onclick="document.getElementById('folderTxtInput').click()">Chọn thư mục</button>
+        <input type="file" id="folderTxtInput" webkitdirectory style="display:none" onchange="loadFolderTxt(this)"/>
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:6px">
+      <button class="btn btn-ghost" onclick="clearSources()">🗑 Xóa tất cả</button>
+    </div>
+  </div>
+
+  <table class="batch-table" id="batchTable">
+    <thead><tr><th>#</th><th>File</th><th>Prompts</th><th>Trạng thái</th></tr></thead>
+    <tbody id="batchTableBody"><tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr></tbody>
+  </table>
+
+  <div class="action-buttons">
+    <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ TẠO VIDEO</button>
+    <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
+  </div>
+
+  <div class="progress-section" id="progressSection" style="display:none">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+      <span id="progressText" style="font-size:0.82rem">0 / 0</span>
+      <span id="progressBadge" class="badge">Chờ</span>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="right-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h3>🎬 Kết quả <span id="promptCountBadge" class="badge" style="display:none"></span></h3>
+  </div>
+  <div id="resultsEmpty" class="empty-state"><div class="empty-icon">🎬</div><div>Chọn file prompt và bấm Tạo Video</div></div>
+  <table class="results-table" id="resultsTable" style="display:none">
+    <thead><tr><th>#</th><th>Prompt</th><th>Trạng thái</th><th>Video</th></tr></thead>
+    <tbody id="resultsBody"></tbody>
+  </table>
+</div>
+</div>
+</div>
+
+<!-- COOKIE MODAL (same as image app) -->
+<div class="modal-overlay" id="cookieModal" style="display:none" onclick="if(event.target===this)closeCookieModal()">
+  <div class="modal">
+    <div class="modal-header"><h3>🍪 Quản lý Cookie</h3><button class="modal-close" onclick="closeCookieModal()">✕</button></div>
+    <div class="modal-body">
+      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#92400e">⚠️ Cookie chỉ có hạn <b>10–24 giờ</b>. Nhớ kiểm tra và lấy cookie mới trước khi tạo video!</div>
+      <div class="field-row" style="margin-top:12px">
+        <label>Thêm cookie mới</label>
+        <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string..."></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-green" onclick="addCookie()">➕ Thêm</button>
+        <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
+      </div>
+      <div id="cookieTestResult" style="margin-top:8px;font-size:0.82rem"></div>
+      <table class="cookie-table" id="cookieTable" style="margin-top:12px">
+        <thead><tr><th>#</th><th>Cookie (hash)</th><th>Email</th><th>Trạng thái</th><th></th></tr></thead>
+        <tbody id="cookieTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
