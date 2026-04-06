@@ -40,6 +40,7 @@ export default {
     // ── Generate with auto-inject cookie from D1 ──
     if (path === "/generate" && request.method === "POST") return handleGenerate(request, env);
     if (path === "/generate-video" && request.method === "POST") return handleGenerate(request, env, "/generate-video");
+    if (path === "/generate-video-from-image" && request.method === "POST") return handleGenerate(request, env, "/generate-video-from-image");
 
     // ── reCAPTCHA token (auto-inject cookie) ──
     if (path === "/recaptcha-token" && request.method === "POST") return handleRecaptchaToken(request, env);

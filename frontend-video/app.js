@@ -12,6 +12,8 @@ let batchFiles = [];
 let currentJobId = null;
 let pollInterval = null;
 let pollFailCount = 0;
+let rowRefImages = {}; // {rowIndex: base64string} — 1 ảnh per row (I2V chỉ cần 1)
+let refImportTargetRow = -1;
 
 function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
 
@@ -44,7 +46,11 @@ function showApp() {
 function clearAuth() { authToken = ""; authUser = null; localStorage.removeItem("bp_token"); localStorage.removeItem("bp_user"); }
 function logout() { clearAuth(); showLogin(); }
 let authTab = "login";
-function switchAuthTab(tab) { authTab = tab; document.querySelectorAll(".auth-tab").forEach((b, i) => b.classList.toggle("active", (i === 0 && tab === "login") || (i === 1 && tab === "register"))); }
+function switchAuthTab(tab) {
+  authTab = tab;
+  document.querySelectorAll(".login-tab").forEach((b, i) => b.classList.toggle("active", (i === 0 && tab === "login") || (i === 1 && tab === "register")));
+  document.getElementById("authSubmitBtn").textContent = tab === "login" ? "Đăng nhập" : "Đăng ký";
+}
 async function handleAuth(e) {
   e.preventDefault();
   const username = document.getElementById("authUsername").value.trim(), password = document.getElementById("authPassword").value;
@@ -65,7 +71,7 @@ async function handleAuth(e) {
 async function loadCookiesFromDB() { try { const res = await apiFetch("/user/cookies"); if (res.ok) cookies = await res.json(); renderCookieTable(); } catch (e) {} }
 function renderCookieTable() {
   const tbody = document.getElementById("cookieTableBody");
-  tbody.innerHTML = cookies.map((c, i) => `<tr><td>${i + 1}</td><td>${esc(c.cookie_hash)}</td><td>${esc(c.email || "—")}</td><td>${c.status}</td><td><button class="btn btn-red btn-sm" onclick="deleteCookie(${c.id})">🗑</button></td></tr>`).join("") || '<tr><td colspan="5" style="text-align:center;padding:12px">Chưa có cookie</td></tr>';
+  tbody.innerHTML = cookies.map((c, i) => `<tr><td>${i + 1}</td><td style="font-family:monospace;font-size:0.75rem">${esc((c.cookie_hash||"").slice(0,12))}...</td><td>${esc(c.email || "—")}</td><td>${c.status}</td><td><button class="btn btn-red btn-sm" onclick="deleteCookie(${c.id})">Xóa</button></td></tr>`).join("") || '<tr><td colspan="5" style="text-align:center;padding:12px">Chưa có cookie</td></tr>';
 }
 function parseCookieInput(raw) { try { const arr = JSON.parse(raw); if (Array.isArray(arr)) { const o = {}; arr.forEach(c => { if (c.name && c.value) o[c.name] = c.value; }); return o; } } catch(e) {} const o = {}; raw.split(";").forEach(p => { const [k,...v] = p.split("="); if (k?.trim()) o[k.trim()] = v.join("=").trim(); }); return o; }
 async function addCookie() {
@@ -97,10 +103,58 @@ function loadFolderTxt(input) {
   let loaded = 0;
   files.forEach(file => { const r = new FileReader(); r.onload = e => { batchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }); if (++loaded === files.length) renderBatchTable(); }; r.readAsText(file); });
 }
-function clearSources() { batchFiles = []; document.getElementById("txtFilePath").value = ""; document.getElementById("folderTxtPath").value = ""; renderBatchTable(); }
+function clearSources() { batchFiles = []; rowRefImages = {}; document.getElementById("txtFilePath").value = ""; document.getElementById("folderTxtPath").value = ""; renderBatchTable(); }
 function renderBatchTable() {
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("") || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr>';
   if (!currentJobId) populateResultsTable();
+}
+
+// ── Ref Images (per-row + bulk) ──
+function importRefAll() { refImportTargetRow = -1; document.getElementById("refBulkInput").click(); }
+function importRefForRow(idx) { refImportTargetRow = idx; document.getElementById("refRowInput").click(); }
+
+function handleRefBulkImport(input) {
+  const files = Array.from(input.files); if (!files.length) return;
+  const total = batchFiles.flatMap(f => f.prompts).length;
+  // 1 file → assign to all; multiple files → assign by index (cycle)
+  let loaded = 0; const imgs = [];
+  files.forEach(file => {
+    const r = new FileReader();
+    r.onload = e => {
+      imgs.push({ name: file.name, b64: e.target.result });
+      if (++loaded === files.length) {
+        for (let i = 0; i < total; i++) {
+          rowRefImages[i] = imgs.length === 1 ? imgs[0].b64 : (imgs[i] ? imgs[i].b64 : imgs[imgs.length - 1].b64);
+        }
+        refreshRefCells();
+      }
+    };
+    r.readAsDataURL(file);
+  });
+  input.value = "";
+}
+
+function handleRefRowImport(input) {
+  const file = input.files[0]; if (!file) return;
+  const idx = refImportTargetRow;
+  const r = new FileReader();
+  r.onload = e => { rowRefImages[idx] = e.target.result; refreshRefCells(); };
+  r.readAsDataURL(file);
+  input.value = "";
+}
+
+function clearRefAll() { rowRefImages = {}; refreshRefCells(); }
+
+function removeRefImg(idx) { delete rowRefImages[idx]; refreshRefCells(); }
+
+function refreshRefCells() {
+  batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
+    const row = document.getElementById(`resRow${i}`); if (!row) return;
+    const img = rowRefImages[i];
+    row.cells[2].innerHTML = img
+      ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i})">✕</span></span>`
+      : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
+  });
 }
 
 // ── Generate ──
@@ -108,21 +162,33 @@ async function startGeneration() {
   if (!cookies.length) { sAlert("Vui lòng thêm cookie."); return; }
   const prompts = batchFiles.flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
-  const model = document.getElementById("modelSelect").value;
-  const num_videos = parseInt(document.getElementById("numVideosInput").value) || 1;
 
-  document.getElementById("progressSection").style.display = "block";
+  const num_videos = parseInt(document.getElementById("numVideosInput").value) || 1;
+  const t2vModel = document.getElementById("modelSelect").value;
+  const i2vModel = document.getElementById("i2vModelSelect").value;
+
+  document.getElementById("progressCard").style.display = "block";
   document.getElementById("runBtn").disabled = true;
   document.getElementById("stopBtn").disabled = false;
   populateResultsTable();
 
+  // Build per-prompt ref map: {promptIndex: base64}
+  const refMap = {};
+  prompts.forEach((_, i) => { if (rowRefImages[i]) refMap[String(i)] = rowRefImages[i]; });
+
   try {
-    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify({ prompts, model, num_videos }) });
+    const body = { prompts, t2v_model: t2vModel, i2v_model: i2vModel, num_videos, ref_images: refMap };
+    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
     currentJobId = job.job_id;
     startPolling();
-  } catch (e) { sAlert("Lỗi: " + e.message, "error"); document.getElementById("runBtn").disabled = false; document.getElementById("stopBtn").disabled = true; }
+  } catch (e) {
+    sAlert("Lỗi: " + e.message, "error");
+    document.getElementById("runBtn").disabled = false;
+    document.getElementById("stopBtn").disabled = true;
+    document.getElementById("progressCard").style.display = "none";
+  }
 }
 
 function startPolling() {
@@ -139,7 +205,7 @@ function startPolling() {
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval); currentJobId = null; resetUI();
         if (job.status === "error") sAlert(job.error || "Lỗi", "error");
-        else sSuccess(`Hoàn thành ${job.completed} video!`);
+        else sSuccess(`Hoàn thành ${job.completed} prompt!`);
       }
     } catch (e) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối", "error"); resetUI(); } }
   }, 3000);
@@ -152,31 +218,47 @@ async function stopGeneration() {
   currentJobId = null; resetUI();
 }
 
-function resetUI() { document.getElementById("runBtn").disabled = false; document.getElementById("stopBtn").disabled = true; }
+function resetUI() {
+  document.getElementById("runBtn").disabled = false;
+  document.getElementById("stopBtn").disabled = true;
+  document.getElementById("progressCard").style.display = "none";
+}
 
 function updateProgress(job) {
   const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
   document.getElementById("progressFill").style.width = pct + "%";
   document.getElementById("progressText").textContent = `${job.completed} / ${job.total} prompt (${pct}%)`;
+  const labels = { pending: "Chờ", running: "Đang tạo", done: "Hoàn thành", error: "Lỗi" };
   const badge = document.getElementById("progressBadge");
-  const labels = { pending: "Chờ", running: "Đang tạo", done: "Xong", error: "Lỗi" };
   badge.className = `badge badge-${job.status}`; badge.textContent = labels[job.status] || job.status;
+  const sb = document.getElementById("statusBadge");
+  if (sb) { sb.className = `badge badge-${job.status}`; sb.textContent = labels[job.status] || job.status; }
 }
 
 function populateResultsTable() {
   const allPrompts = batchFiles.flatMap(f => f.prompts);
   const tbody = document.getElementById("resultsBody");
   const empty = document.getElementById("resultsEmpty");
-  const table = document.getElementById("resultsTable");
   const badge = document.getElementById("promptCountBadge");
-  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; table.style.display = "none"; badge.style.display = "none"; return; }
-  empty.style.display = "none"; table.style.display = ""; badge.style.display = ""; badge.textContent = `${allPrompts.length} prompt`;
+  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; return; }
+  empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} prompt`;
+
   let html = "", idx = 0;
   batchFiles.forEach(f => {
     const strip = n => n.replace(/\.txt$/i, "");
-    html += `<tr class="file-separator"><td colspan="4">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
+    html += `<tr class="file-separator"><td colspan="5">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
     f.prompts.forEach(text => {
-      html += `<tr id="resRow${idx}"><td>${idx + 1}</td><td><div class="prompt-cell">${esc(text)}</div></td><td class="status-cell">⏳ Chờ</td><td>—</td></tr>`;
+      const img = rowRefImages[idx];
+      const refCell = img
+        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx})">✕</span></span>`
+        : `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ảnh</span>`;
+      html += `<tr id="resRow${idx}">
+        <td>${idx + 1}</td>
+        <td><div class="prompt-cell">${esc(text)}</div></td>
+        <td style="text-align:center">${refCell}</td>
+        <td class="status-cell">⏳ Chờ</td>
+        <td>—</td>
+      </tr>`;
       idx++;
     });
   });
@@ -189,12 +271,12 @@ function updateResults(job) {
     const row = document.getElementById(`resRow${idx}`); if (!row) return;
     if (v.urls && v.urls.length) {
       row.className = "row-done";
-      row.cells[2].innerHTML = '<span class="status-ok">✅ Xong</span>';
-      row.cells[3].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm">▶ Video ${i + 1}</a>`).join(" ");
+      row.cells[3].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${v.mode === 'i2v' ? '🖼 I2V' : '📝 T2V'}</span>`;
+      row.cells[4].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">▶ Video ${i + 1}</a>`).join("");
     } else if (v.error) {
       row.className = "row-error";
-      row.cells[2].innerHTML = '<span class="status-err">❌ Lỗi</span>';
-      row.cells[3].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
+      row.cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';
+      row.cells[4].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
     }
   });
   // Mark running
@@ -202,8 +284,18 @@ function updateResults(job) {
     const row = document.getElementById(`resRow${videos.length}`);
     if (row && row.className !== "row-done" && row.className !== "row-error") {
       row.className = "row-running";
-      row.cells[2].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
+      row.cells[3].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
       row.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
+  // Update batch table status
+  let offset = 0;
+  batchFiles.forEach(f => {
+    const end = offset + f.prompts.length;
+    const done = videos.slice(offset, end).filter(v => v).length;
+    if (done >= f.prompts.length) f.status = videos.slice(offset, end).every(v => v && v.urls?.length) ? "✅ Xong" : "⚠️ Có lỗi";
+    else if (done > 0) f.status = `🔄 ${done}/${f.prompts.length}`;
+    offset = end;
+  });
+  document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("");
 }

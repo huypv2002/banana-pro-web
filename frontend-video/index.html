@@ -15,14 +15,15 @@
   <div class="login-card">
     <div class="login-logo">🎬</div>
     <h2>Banana Pro Video</h2>
-    <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchAuthTab('login')">Đăng nhập</button>
-      <button class="auth-tab" onclick="switchAuthTab('register')">Đăng ký</button>
+    <p class="login-subtitle">Đăng nhập để tiếp tục</p>
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="switchAuthTab('login')">Đăng nhập</button>
+      <button class="login-tab" onclick="switchAuthTab('register')">Đăng ký</button>
     </div>
     <form onsubmit="return handleAuth(event)">
-      <input type="text" id="authUsername" placeholder="Username" required/>
-      <input type="password" id="authPassword" placeholder="Password" required/>
-      <button type="submit" class="btn btn-primary" style="width:100%">Đăng nhập</button>
+      <input type="text" id="authUsername" placeholder="Username" required autocomplete="username"/>
+      <input type="password" id="authPassword" placeholder="Password" required autocomplete="current-password"/>
+      <button type="submit" class="login-btn" id="authSubmitBtn">Đăng nhập</button>
     </form>
     <div id="authError" class="auth-error" style="display:none"></div>
   </div>
@@ -39,7 +40,7 @@
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
     <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
-    <button class="btn btn-ghost" onclick="logout()">🚪</button>
+    <button class="btn btn-outline" onclick="logout()">🚪 Đăng xuất</button>
   </div>
 </header>
 
@@ -48,8 +49,8 @@
 <div class="left-panel">
   <div class="card">
     <div class="card-title">⚙️ Cài đặt</div>
-    <div class="settings-grid">
-      <label>Model</label>
+    <div class="form-grid">
+      <label>Model T2V</label>
       <select id="modelSelect">
         <optgroup label="Landscape (16:9)">
           <option value="low_fast_16_9">Low Fast (16:9) - 0 credits</option>
@@ -62,15 +63,15 @@
           <option value="quality_9_16">Quality (9:16) - 100 credits</option>
         </optgroup>
       </select>
+      <label>Model I2V</label>
+      <select id="i2vModelSelect">
+        <option value="fast_i2v" selected>Fast I2V - 10 credits</option>
+        <option value="quality_i2v">Quality I2V - 100 credits</option>
+      </select>
       <label>Số video / prompt</label>
       <input type="number" id="numVideosInput" value="1" min="1" max="4"/>
-      <label>Upscale</label>
-      <select id="upscaleSelect">
-        <option value="none">Không upscale</option>
-        <option value="1080p">1080p</option>
-        <option value="4k">4K</option>
-      </select>
     </div>
+    <div style="margin-top:8px;font-size:0.76rem;color:var(--muted)">💡 Prompt có ảnh ref → dùng I2V, không có → dùng T2V</div>
   </div>
 
   <div class="card">
@@ -92,62 +93,91 @@
       </div>
     </div>
     <div style="text-align:right;margin-top:6px">
-      <button class="btn btn-ghost" onclick="clearSources()">🗑 Xóa tất cả</button>
+      <button class="btn btn-ghost" onclick="clearSources()">🧹 Xóa danh sách</button>
     </div>
+    <table class="batch-table" id="batchTable" style="margin-top:8px">
+      <thead><tr><th>STT</th><th>File</th><th>Prompts</th><th>Trạng thái</th></tr></thead>
+      <tbody id="batchTableBody"><tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr></tbody>
+    </table>
   </div>
 
-  <table class="batch-table" id="batchTable">
-    <thead><tr><th>#</th><th>File</th><th>Prompts</th><th>Trạng thái</th></tr></thead>
-    <tbody id="batchTableBody"><tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr></tbody>
-  </table>
-
-  <div class="action-buttons">
+  <div class="action-buttons" style="grid-template-columns:1fr 1fr">
     <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ TẠO VIDEO</button>
     <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
   </div>
 
-  <div class="progress-section" id="progressSection" style="display:none">
-    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-      <span id="progressText" style="font-size:0.82rem">0 / 0</span>
-      <span id="progressBadge" class="badge">Chờ</span>
+  <div class="card" id="progressCard" style="display:none">
+    <div class="progress-header">
+      <span id="progressLabel">Đang tạo...</span>
+      <span id="progressBadge" class="badge badge-running">Đang tạo</span>
     </div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">0 / 0 video (0%)</div>
   </div>
 </div>
 
 <!-- RIGHT PANEL -->
 <div class="right-panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <h3>🎬 Kết quả <span id="promptCountBadge" class="badge" style="display:none"></span></h3>
+  <div class="results-header">
+    <h2>🎬 Kết quả <span id="statusBadge"></span> <span id="promptCountBadge" class="badge badge-pending" style="display:none"></span></h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="importRefAll()">📷 Import ảnh tất cả</button>
+      <button class="btn btn-ghost" onclick="clearRefAll()">🗑 Xóa ảnh tất cả</button>
+    </div>
+    <input type="file" id="refBulkInput" multiple accept="image/*" style="display:none" onchange="handleRefBulkImport(this)"/>
+    <input type="file" id="refRowInput" multiple accept="image/*" style="display:none" onchange="handleRefRowImport(this)"/>
   </div>
-  <div id="resultsEmpty" class="empty-state"><div class="empty-icon">🎬</div><div>Chọn file prompt và bấm Tạo Video</div></div>
-  <table class="results-table" id="resultsTable" style="display:none">
-    <thead><tr><th>#</th><th>Prompt</th><th>Trạng thái</th><th>Video</th></tr></thead>
-    <tbody id="resultsBody"></tbody>
-  </table>
+  <div class="results-table-wrap" id="resultsTableWrap">
+    <table class="results-table" id="resultsTable">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th class="col-prompt">Prompt</th>
+          <th style="width:80px">Ảnh Ref</th>
+          <th style="width:100px">Trạng thái</th>
+          <th>Video</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+    <div id="resultsEmpty" class="empty-state">
+      <div class="empty-icon">🎬</div>
+      <div>Chọn file prompt và bấm TẠO VIDEO</div>
+    </div>
+  </div>
 </div>
 </div>
 </div>
 
-<!-- COOKIE MODAL (same as image app) -->
+<!-- COOKIE MODAL -->
 <div class="modal-overlay" id="cookieModal" style="display:none" onclick="if(event.target===this)closeCookieModal()">
   <div class="modal">
-    <div class="modal-header"><h3>🍪 Quản lý Cookie</h3><button class="modal-close" onclick="closeCookieModal()">✕</button></div>
+    <div class="modal-header">
+      <h3>🍪 Quản lý Cookie</h3>
+      <button class="modal-close" onclick="closeCookieModal()">✕</button>
+    </div>
     <div class="modal-body">
       <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#92400e">⚠️ Cookie chỉ có hạn <b>10–24 giờ</b>. Nhớ kiểm tra và lấy cookie mới trước khi tạo video!</div>
+      <div class="cookie-help">
+        <strong>Cách lấy cookie:</strong> Cài
+        <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank">Cookie Editor</a>
+        → vào <a href="https://labs.google" target="_blank">labs.google</a> → đăng nhập → Export → Copy
+      </div>
       <div class="field-row" style="margin-top:12px">
         <label>Thêm cookie mới</label>
-        <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string..."></textarea>
+        <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn btn-green" onclick="addCookie()">➕ Thêm</button>
         <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
       </div>
-      <div id="cookieTestResult" style="margin-top:8px;font-size:0.82rem"></div>
       <table class="cookie-table" id="cookieTable" style="margin-top:12px">
         <thead><tr><th>#</th><th>Cookie (hash)</th><th>Email</th><th>Trạng thái</th><th></th></tr></thead>
         <tbody id="cookieTableBody"></tbody>
       </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeCookieModal()">💾 Đóng</button>
     </div>
   </div>
 </div>
