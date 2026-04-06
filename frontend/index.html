@@ -80,14 +80,6 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">🎨 Chế độ tạo ảnh</div>
-      <div class="radio-group">
-        <label class="radio-label"><input type="radio" name="mode" value="normal" checked onchange="setMode('normal')"/> Thường (file .txt)</label>
-        <label class="radio-label"><input type="radio" name="mode" value="folder" onchange="setMode('folder')"/> Folder Structure</label>
-      </div>
-    </div>
-
     <div class="card" id="promptSourceCard">
       <div class="card-title">📄 Nguồn prompt (.txt)</div>
       <div class="field-row">
@@ -112,22 +104,6 @@
       <table class="batch-table" id="batchTable">
         <thead><tr><th>STT</th><th>Tên File</th><th>Số Prompt</th><th>Trạng thái</th></tr></thead>
         <tbody id="batchTableBody"></tbody>
-      </table>
-    </div>
-
-    <div class="card" id="folderStructureCard" style="display:none">
-      <div class="card-title">📁 Folder Structure Mode</div>
-      <div class="field-row">
-        <label>Folder cha</label>
-        <div class="input-btn-row">
-          <input type="text" id="parentFolder" readonly placeholder="Chọn folder cha..."/>
-          <button class="btn btn-blue" onclick="document.getElementById('parentFolderInput').click()">Chọn folder cha</button>
-          <input type="file" id="parentFolderInput" webkitdirectory style="display:none" onchange="loadParentFolder(this)"/>
-        </div>
-      </div>
-      <table class="batch-table" id="folderStructureTable" style="margin-top:8px">
-        <thead><tr><th>STT</th><th>Folder Con</th><th>Số Ảnh</th><th>Số Prompt</th></tr></thead>
-        <tbody id="folderStructureBody"></tbody>
       </table>
     </div>
 
