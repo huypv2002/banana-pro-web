@@ -427,17 +427,23 @@ function startPolling(model) {
       updateResultsFromJob(job);
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval);
+        const finishedJobId = currentJobId;
+        currentJobId = null;
         setLoading(false);
         if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
         // Save history to D1 - only successful images, with source file name
         if (job.images?.length) {
           const folderName = getBatchName();
-          // Map prompt index → file name
+          // Map image index → file name (accounting for variants)
           const promptFileMap = [];
           const strip = n => n.replace(/\.txt$/i, "");
-          batchFiles.forEach(f => f.prompts.forEach(() => promptFileMap.push(strip(f.name))));
+          const imgVariants = job.total > 0 && batchFiles.flatMap(f => f.prompts).length > 0
+            ? Math.round(job.total / batchFiles.flatMap(f => f.prompts).length) : 1;
+          batchFiles.forEach(f => f.prompts.forEach(() => {
+            for (let v = 0; v < imgVariants; v++) promptFileMap.push(strip(f.name));
+          }));
           const successItems = job.images.map((img, idx) => img.url ? {
-            job_id: currentJobId, prompt: img.prompt, model: model || "",
+            job_id: finishedJobId, prompt: img.prompt, model: model || "",
             image_url: img.url, batch_name: folderName, file_name: promptFileMap[idx] || "",
           } : null).filter(Boolean);
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
@@ -464,9 +470,10 @@ async function stopGeneration() {
   if (!currentJobId) return;
   clearInterval(pollInterval);
   await apiFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
+  currentJobId = null;
   setLoading(false);
   document.getElementById("progressText").textContent = "Đã dừng.";
-  batchFiles.forEach(f => { if (f.status === "🔄 Đang chạy") f.status = "⏹ Dừng"; });
+  batchFiles.forEach(f => { if (f.status.includes("🔄")) f.status = "⏹ Dừng"; });
   renderBatchTable();
 }
 
@@ -799,6 +806,7 @@ function updateProgress(job) {
 // ── Results Table ──────────────────────────────────────────────────────────────
 function populateResultsTable() {
   const allPrompts = batchFiles.flatMap(f => f.prompts);
+  const variants = parseInt(document.getElementById("variantsInput").value) || 1;
   const tbody = document.getElementById("resultsBody");
   const empty = document.getElementById("resultsEmpty");
   const badge = document.getElementById("promptCountBadge");
@@ -811,25 +819,33 @@ function populateResultsTable() {
   }
   empty.style.display = "none";
   badge.style.display = "";
-  badge.textContent = `${allPrompts.length} prompt`;
+  const totalImages = allPrompts.length * variants;
+  badge.textContent = `${totalImages} ảnh (${allPrompts.length} prompt × ${variants})`;
 
   let html = "", globalIdx = 0;
   batchFiles.forEach(f => {
     const strip = n => n.replace(/\.(txt)$/i, "");
-    html += `<tr class="file-separator"><td colspan="5">📄 ${esc(strip(f.name))} <span style="color:var(--muted);font-weight:400">(${f.prompts.length} prompt)</span></td></tr>`;
+    const fileTotal = f.prompts.length * variants;
+    html += `<tr class="file-separator"><td colspan="5">📄 ${esc(strip(f.name))} <span style="color:var(--muted);font-weight:400">(${f.prompts.length} prompt × ${variants} = ${fileTotal} ảnh)</span></td></tr>`;
     f.prompts.forEach((text, j) => {
-      const i = globalIdx++;
-      const imgs = rowRefImages[i] || [];
-      const refCell = imgs.length
-        ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`
-        : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
-      html += `<tr id="resRow${i}">
-        <td>${i + 1}</td>
-        <td><div class="prompt-cell">${esc(text)}</div></td>
-        <td style="text-align:center">${refCell}</td>
-        <td class="status-cell">⏳ Chờ</td>
-        <td style="text-align:center"><span style="color:var(--muted);font-size:0.72rem">—</span></td>
-      </tr>`;
+      for (let v = 0; v < variants; v++) {
+        const i = globalIdx++;
+        const promptIdx = batchFiles.slice(0, batchFiles.indexOf(f)).reduce((s, ff) => s + ff.prompts.length, 0) + j;
+        const imgs = rowRefImages[promptIdx] || [];
+        const varLabel = variants > 1 ? ` <span style="color:var(--muted);font-size:0.7rem">[${v + 1}/${variants}]</span>` : "";
+        const refCell = v === 0
+          ? (imgs.length
+            ? imgs.map(s => `<img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/>`).join("") + `<br><span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>`
+            : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>`)
+          : `<span style="color:var(--muted);font-size:0.7rem">—</span>`;
+        html += `<tr id="resRow${i}">
+          <td>${i + 1}</td>
+          <td><div class="prompt-cell">${esc(text)}${varLabel}</div></td>
+          <td style="text-align:center">${refCell}</td>
+          <td class="status-cell">⏳ Chờ</td>
+          <td style="text-align:center"><span style="color:var(--muted);font-size:0.72rem">—</span></td>
+        </tr>`;
+      }
     });
   });
   tbody.innerHTML = html;
@@ -842,8 +858,10 @@ function updateResultsFromJob(job) {
 
   const completed = job.completed || 0;
   const total = job.total || allPrompts.length;
+  const variants = total > 0 && allPrompts.length > 0 ? Math.round(total / allPrompts.length) : 1;
 
   // Update completed rows from images array
+  // images array index maps directly to resRow index (both are prompt*variants)
   images.forEach((img, idx) => {
     const row = document.getElementById(`resRow${idx}`);
     if (!row) return;
@@ -872,17 +890,19 @@ function updateResultsFromJob(job) {
   }
 
   // Update per-file status in batch table
+  // Each file has f.prompts.length * variants images in the backend
   let offset = 0;
   batchFiles.forEach((f, fi) => {
+    const fileImageCount = f.prompts.length * variants;
     const fileStart = offset;
-    const fileEnd = offset + f.prompts.length;
+    const fileEnd = offset + fileImageCount;
     offset = fileEnd;
     const fileDone = images.slice(fileStart, fileEnd).filter(img => img).length;
-    if (fileDone >= f.prompts.length) {
+    if (fileDone >= fileImageCount) {
       const allOk = images.slice(fileStart, fileEnd).every(img => img && img.url);
       f.status = allOk ? "✅ Xong" : "⚠️ Có lỗi";
     } else if (fileDone > 0 || (completed >= fileStart && completed < fileEnd)) {
-      f.status = `🔄 ${fileDone}/${f.prompts.length}`;
+      f.status = `🔄 ${fileDone}/${fileImageCount}`;
     } else if (completed >= fileEnd) {
       f.status = "✅ Xong";
     } else {
