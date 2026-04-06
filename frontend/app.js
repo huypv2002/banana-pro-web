@@ -1,5 +1,12 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
 
+// ── SweetAlert2 helpers ───────────────────────────────────────────────────────
+const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500, timerProgressBar: true });
+function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmButtonColor: "#16a34a" }); }
+function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
+function sError(text) { return Swal.fire({ text, icon: "error", confirmButtonColor: "#16a34a" }); }
+async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
+
 // ── Auth State ────────────────────────────────────────────────────────────────
 let authToken = localStorage.getItem("bp_token") || "";
 let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
@@ -142,14 +149,14 @@ async function addCookie() {
   const raw = document.getElementById("newCookieInput").value.trim();
   if (!raw) return;
   const parsed = parseCookieInput(raw);
-  if (!parsed || !Object.keys(parsed).length) { alert("Cookie không hợp lệ"); return; }
+  if (!parsed || !Object.keys(parsed).length) { sAlert("Cookie không hợp lệ"); return; }
   const hash = cookieHash(parsed);
   const res = await apiFetch("/user/cookies", {
     method: "POST",
     body: JSON.stringify({ cookie_raw: raw, cookie_hash: hash }),
   });
   const data = await res.json();
-  if (!res.ok) { alert(data.error || "Lỗi"); return; }
+  if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("newCookieInput").value = "";
   loadCookiesFromDB();
 }
@@ -179,7 +186,7 @@ async function deleteCookie(id) {
 }
 
 async function clearAllCookies() {
-  if (!confirm("Xóa tất cả cookie?")) return;
+  if (!await sConfirm("Xóa tất cả cookie?")) return;
   await apiFetch("/user/cookies/clear", { method: "DELETE" });
   loadCookiesFromDB();
 }
@@ -203,7 +210,7 @@ function loadCookieTxt(input) {
       if (res.ok) added++;
     }
     loadCookiesFromDB();
-    alert(`Đã thêm ${added} cookie`);
+    sSuccess(`Đã thêm ${added} cookie`);
   };
   reader.readAsText(file);
 }
@@ -341,7 +348,7 @@ async function startGeneration() {
   }, Date.now());
   const hoursAgo = Math.floor((Date.now() - oldest) / 3600000);
   if (hoursAgo >= 10) {
-    const ok = confirm(`⚠️ Cookie đã được thêm ${hoursAgo} giờ trước.\n\nCookie chỉ có hạn 10–24 giờ, có thể đã hết hạn.\nBạn nên lấy cookie mới trước khi tạo ảnh.\n\nBấm OK để tiếp tục, Cancel để dừng lại.`);
+    const ok = await sConfirm(`Cookie đã được thêm ${hoursAgo} giờ trước.\nCookie chỉ có hạn 10–24 giờ, có thể đã hết hạn.\nBạn nên lấy cookie mới trước khi tạo ảnh.`, "⚠️ Cookie có thể hết hạn");
     if (!ok) return;
   }
 
@@ -599,19 +606,19 @@ function historyGoBack() {
 }
 
 async function deleteHistoryJob(jobId) {
-  if (!confirm("Xóa toàn bộ ảnh trong batch này?")) return;
+  if (!await sConfirm("Xóa toàn bộ ảnh trong batch này?")) return;
   try {
     await apiFetch(`/user/history/${encodeURIComponent(jobId)}`, { method: "DELETE" });
     fetchHistoryPage(false);
-  } catch (e) { alert("Lỗi xóa"); }
+  } catch (e) { sAlert("Lỗi xóa"); }
 }
 
 async function deleteHistoryFailed() {
-  if (!confirm("Xóa tất cả lịch sử lỗi (không có ảnh)?")) return;
+  if (!await sConfirm("Xóa tất cả lịch sử lỗi (không có ảnh)?")) return;
   try {
     await apiFetch("/user/history/failed", { method: "DELETE" });
     fetchHistoryPage(false);
-  } catch (e) { alert("Lỗi xóa"); }
+  } catch (e) { sAlert("Lỗi xóa"); }
 }
 
 function historyPrevPage() {
@@ -660,7 +667,7 @@ function getHistoryUrls(selectedOnly) {
 }
 
 async function historyDownloadZip(urls, btnId) {
-  if (!urls.length) { alert("Không có ảnh để tải"); return; }
+  if (!urls.length) { sAlert("Không có ảnh để tải"); return; }
   const btn = document.getElementById(btnId);
   const origText = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Đang gom..."; }
@@ -677,13 +684,13 @@ async function historyDownloadZip(urls, btnId) {
         zip.file(`image_${String(++idx).padStart(3, "0")}.${ext}`, blob);
       } catch (e) { console.warn("Skip:", url, e); }
     }
-    if (!idx) { alert("Không tải được ảnh nào"); return; }
+    if (!idx) { sAlert("Không tải được ảnh nào"); return; }
     if (btn) btn.textContent = "⏳ Nén ZIP...";
     const content = await zip.generateAsync({ type: "blob" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(content);
     a.download = `history_${new Date().toISOString().slice(0, 10)}.zip`;
     a.click(); URL.revokeObjectURL(a.href);
-  } catch (e) { alert("Lỗi tải ZIP: " + e.message); }
+  } catch (e) { sAlert("Lỗi tải ZIP: " + e.message); }
   finally { if (btn) { btn.textContent = origText; btn.disabled = false; } }
 }
 
@@ -730,10 +737,10 @@ async function adminAddUser() {
   const username = document.getElementById("adminNewUser").value.trim();
   const password = document.getElementById("adminNewPass").value;
   const role = document.getElementById("adminNewRole").value;
-  if (!username || !password) { alert("Thiếu username/password"); return; }
+  if (!username || !password) { sAlert("Thiếu username/password"); return; }
   const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role }) });
   const data = await res.json();
-  if (!res.ok) { alert(data.error || "Lỗi"); return; }
+  if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("adminNewUser").value = "";
   document.getElementById("adminNewPass").value = "";
   loadAdminUsers();
@@ -741,9 +748,9 @@ async function adminAddUser() {
 
 async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
-async function adminDelUser(id) { if (!confirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
 async function adminSetPlan(id, days) {
-  if (days === 0 && !confirm("Hủy gói user này?")) return;
+  if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
   await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
   loadAdminUsers();
 }
@@ -899,7 +906,7 @@ async function downloadAll() {
   document.querySelectorAll("#resultsBody .result-thumb").forEach(img => {
     if (img.src) urls.push(img.src);
   });
-  if (!urls.length) { alert("Không có ảnh để tải"); return; }
+  if (!urls.length) { sAlert("Không có ảnh để tải"); return; }
 
   const btn = document.querySelector('[onclick="downloadAll()"]');
   const origText = btn.textContent;
@@ -927,7 +934,7 @@ async function downloadAll() {
         idx++;
       } catch (e) { console.warn("Skip:", url, e); }
     }
-    if (!idx) { alert("Không tải được ảnh nào"); return; }
+    if (!idx) { sAlert("Không tải được ảnh nào"); return; }
     btn.textContent = "⏳ Đang nén ZIP...";
     const content = await zip.generateAsync({ type: "blob" });
     const a = document.createElement("a");
@@ -936,7 +943,7 @@ async function downloadAll() {
     a.click();
     URL.revokeObjectURL(a.href);
   } catch (e) {
-    alert("Lỗi tải ZIP: " + e.message);
+    sAlert("Lỗi tải ZIP: " + e.message);
   } finally {
     btn.textContent = origText;
     btn.disabled = false;
