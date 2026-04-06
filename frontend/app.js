@@ -418,12 +418,9 @@ function startPolling(model) {
       const job = await res.json();
       updateProgress(job);
       updateResultsFromJob(job);
-      if (job.status === "running") { batchFiles.forEach(f => { if (f.status === "⏳ Chờ") f.status = "🔄 Đang chạy"; }); renderBatchTable(); }
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval);
         setLoading(false);
-        batchFiles.forEach(f => f.status = job.status === "done" ? "✅ Xong" : "❌ Lỗi");
-        renderBatchTable();
         if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
         // Save history to D1 - only successful images, with source file name
         if (job.images?.length) {
