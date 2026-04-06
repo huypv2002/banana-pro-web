@@ -429,33 +429,31 @@ def cancel_job(job_id: str):
 # ── Video Generation ──────────────────────────────────────────────────────────
 
 VIDEO_MODEL_MAP = {
-    # T2V Landscape (16:9)
+    # T2V — base keys, aspect được resolve bởi _get_effective_model
     "t2v_low_16_9":     "veo_3_1_t2v_fast_ultra_relaxed",
     "t2v_fast_16_9":    "veo_3_1_t2v_fast_ultra",
     "t2v_quality_16_9": "veo_3_1_t2v",
-    # T2V Portrait (9:16)
-    "t2v_low_9_16":     "veo_3_1_t2v_fast_portrait_ultra_relaxed",
-    "t2v_fast_9_16":    "veo_3_1_t2v_fast_portrait_ultra",
-    "t2v_quality_9_16": "veo_3_1_t2v_portrait",
-    # Legacy keys (backward compat)
+    "t2v_low_9_16":     "veo_3_1_t2v_fast_ultra_relaxed",   # _get_effective_model sẽ map sang portrait
+    "t2v_fast_9_16":    "veo_3_1_t2v_fast_ultra",
+    "t2v_quality_9_16": "veo_3_1_t2v",
+    # Legacy
     "low_fast_16_9":    "veo_3_1_t2v_fast_ultra_relaxed",
     "fast_16_9":        "veo_3_1_t2v_fast_ultra",
     "quality_16_9":     "veo_3_1_t2v",
-    "low_fast_9_16":    "veo_3_1_t2v_fast_portrait_ultra_relaxed",
-    "fast_9_16":        "veo_3_1_t2v_fast_portrait_ultra",
-    "quality_9_16":     "veo_3_1_t2v_portrait",
+    "low_fast_9_16":    "veo_3_1_t2v_fast_ultra_relaxed",
+    "fast_9_16":        "veo_3_1_t2v_fast_ultra",
+    "quality_9_16":     "veo_3_1_t2v",
 }
 
 VIDEO_I2V_MODEL_MAP = {
-    # I2V single image — Landscape
+    # I2V — base keys, aspect được resolve bởi _get_effective_model
     "i2v_low_16_9":     "veo_3_1_i2v_s_fast_ultra_relaxed",
     "i2v_fast_16_9":    "veo_3_1_i2v_s_fast_ultra",
     "i2v_quality_16_9": "veo_3_1_i2v_s",
-    # I2V single image — Portrait
-    "i2v_low_9_16":     "veo_3_1_i2v_s_fast_portrait_ultra_relaxed",
-    "i2v_fast_9_16":    "veo_3_1_i2v_s_fast_portrait_ultra",
-    "i2v_quality_9_16": "veo_3_1_i2v_s_portrait",
-    # Legacy keys
+    "i2v_low_9_16":     "veo_3_1_i2v_s_fast_ultra_relaxed",  # _get_effective_model → portrait
+    "i2v_fast_9_16":    "veo_3_1_i2v_s_fast_ultra",
+    "i2v_quality_9_16": "veo_3_1_i2v_s",
+    # Legacy
     "fast_i2v":         "veo_3_1_i2v_s_fast_ultra",
     "quality_i2v":      "veo_3_1_i2v_s",
 }
@@ -557,8 +555,9 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                     os.unlink(tmp_path)
                     if not media_id:
                         raise ValueError("Upload ảnh thất bại: " + (client.last_error_detail or ""))
-                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "portrait" in i2v_key else "VIDEO_ASPECT_RATIO_LANDSCAPE"
-                    logger.info(f"[VIDEO {job_id}] [{idx+1}] I2V: {prompt[:50]}...")
+                    # Detect aspect từ model key name (9_16 → portrait)
+                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "9_16" in i2v_model else "VIDEO_ASPECT_RATIO_LANDSCAPE"
+                    logger.info(f"[VIDEO {job_id}] [{idx+1}] I2V ({i2v_key}, {aspect}): {prompt[:50]}...")
                     result = client.generate_videos_from_image(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
                         prompt=prompt, media_id=media_id, model_key=i2v_key, num_videos=num_videos,
@@ -567,8 +566,8 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                     mode = "i2v"
                 else:
                     # T2V
-                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "portrait" in t2v_key else "VIDEO_ASPECT_RATIO_LANDSCAPE"
-                    logger.info(f"[VIDEO {job_id}] [{idx+1}] T2V: {prompt[:50]}...")
+                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "9_16" in t2v_model else "VIDEO_ASPECT_RATIO_LANDSCAPE"
+                    logger.info(f"[VIDEO {job_id}] [{idx+1}] T2V ({t2v_key}, {aspect}): {prompt[:50]}...")
                     result = client.generate_videos(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
                         prompt=prompt, model_key=t2v_key, num_videos=num_videos, aspect_ratio=aspect,
