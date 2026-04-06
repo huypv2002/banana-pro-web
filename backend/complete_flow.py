@@ -6840,7 +6840,9 @@ class LabsFlowClient:
                 timeout=180,
             )
             resp.raise_for_status()
-            return resp.json()
+            result = resp.json()
+            print(f"  ✅ Upsample response: {json.dumps(result, indent=2)[:1000]}")
+            return result
         except Exception as e:
             detail = str(e)
             try:

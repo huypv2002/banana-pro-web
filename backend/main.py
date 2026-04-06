@@ -229,7 +229,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                         url = up_url
                                         logger.info(f"[{job_id}] Upscale OK: {up_url[:60]}...")
                                     else:
-                                        logger.warning(f"[{job_id}] Upscale: no URL in response")
+                                        logger.warning(f"[{job_id}] Upscale: no URL in response. Keys: {list(up_result.keys()) if isinstance(up_result, dict) else type(up_result)}")
                                 else:
                                     logger.warning(f"[{job_id}] Upscale failed: {client.last_error_detail}")
                         results[task_idx] = {"prompt": prompt, "url": url, "model": model}
