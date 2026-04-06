@@ -474,11 +474,6 @@ class VideoFromImageRequest(BaseModel):
     model: str = "fast_i2v"
     num_videos: int = 1
 
-VIDEO_I2V_MODEL_MAP = {
-    "fast_i2v":    "veo_3_1_i2v_s_fast_ultra",
-    "quality_i2v": "veo_3_1_i2v_s",
-}
-
 @app.post("/generate-video")
 async def generate_video(req: VideoGenerateRequest):
     if not req.prompts:
