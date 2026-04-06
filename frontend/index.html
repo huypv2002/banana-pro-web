@@ -197,9 +197,13 @@
 <div id="tabHistory" class="tab-content" style="display:none">
   <div class="history-container">
     <div class="history-header">
-      <h2>📜 Lịch sử tạo ảnh</h2>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">← Quay lại</button>
+        <h2 id="historyTitle">📜 Lịch sử tạo ảnh</h2>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-blue" onclick="loadHistory()">🔄 Làm mới</button>
+        <button class="btn btn-red" onclick="deleteHistoryFailed()">🗑 Xóa lỗi</button>
         <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">⬇ Tải tất cả (ZIP)</button>
         <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">⬇ Tải đã chọn</button>
         <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="historySelectAll" onchange="historyToggleAll(this.checked)"/> Chọn tất cả</label>

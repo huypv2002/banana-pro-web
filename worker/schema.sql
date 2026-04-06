@@ -40,6 +40,7 @@ CREATE TABLE gen_history (
   model TEXT,
   image_url TEXT,
   error TEXT,
+  batch_name TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );

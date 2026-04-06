@@ -191,3 +191,20 @@ textarea { resize: vertical; }
 .results-table .result-actions { display: flex; gap: 4px; margin-top: 4px; }
 .results-table .result-actions a { font-size: 0.68rem; color: var(--blue); text-decoration: none; font-weight: 600; }
 .results-table .result-actions a:hover { text-decoration: underline; }
+
+/* ── History Folder View ──────────────────────────────────────────────────── */
+.hist-folder { display:flex; align-items:center; gap:12px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; transition:all .15s; }
+.hist-folder:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(22,163,74,.12); transform:translateY(-1px); }
+.hist-folder-icon { font-size:2rem; flex-shrink:0; }
+.hist-folder-info { flex:1; min-width:0; }
+.hist-folder-name { font-weight:600; font-size:0.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hist-folder-meta { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+.hist-folder-del { flex-shrink:0; opacity:0; transition:opacity .15s; }
+.hist-folder:hover .hist-folder-del { opacity:1; }
+#historyGrid.results-grid { display:flex; flex-direction:column; gap:8px; }
+.hist-folder + .hist-folder { }
+/* When viewing images inside folder, switch to grid */
+#historyGrid.results-grid.grid-mode { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; flex-direction:unset; }
+.btn-sm { padding:4px 10px; font-size:0.75rem; }
+.btn-red { background:var(--error); color:#fff; border:none; border-radius:8px; padding:6px 14px; cursor:pointer; font-size:0.82rem; }
+.btn-red:hover { background:#b91c1c; }

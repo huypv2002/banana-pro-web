@@ -404,13 +404,13 @@ function startPolling(model) {
         batchFiles.forEach(f => f.status = job.status === "done" ? "✅ Xong" : "❌ Lỗi");
         renderBatchTable();
         if (job.status === "error") showError(job.error || "Có lỗi xảy ra.");
-        // Save history to D1
+        // Save history to D1 - only successful images
         if (job.images?.length) {
-          const items = job.images.map(img => ({
+          const successItems = job.images.filter(img => img.url).map(img => ({
             job_id: currentJobId, prompt: img.prompt, model: model || "",
-            image_url: img.url || null, error: img.error || null,
+            image_url: img.url, batch_name: batchFiles.map(f => f.name).join(", ") || "Untitled",
           }));
-          apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items }) }).catch(() => {});
+          if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
         }
       }
     } catch (e) {}
@@ -433,9 +433,13 @@ async function stopGeneration() {
 let historyPage = 0;
 let historyLoading = false;
 const HISTORY_LIMIT = 50;
+let historyView = "folders"; // "folders" | "images"
+let historyCurrentJob = null;
 
 async function loadHistory() {
   historyPage = 0;
+  historyView = "folders";
+  historyCurrentJob = null;
   document.getElementById("historySelectAll").checked = false;
   await fetchHistoryPage(false);
 }
@@ -447,23 +451,87 @@ async function fetchHistoryPage(append) {
   const prevBtn = document.getElementById("historyPrev");
   const nextBtn = document.getElementById("historyNext");
   const pageInfo = document.getElementById("historyPageInfo");
+  const backBtn = document.getElementById("historyBack");
 
   if (!append) grid.innerHTML = '<div class="empty-state">⏳ Đang tải...</div>';
 
   try {
-    const offset = historyPage * HISTORY_LIMIT;
-    const res = await apiFetch(`/user/history?limit=${HISTORY_LIMIT}&offset=${offset}`);
-    if (!res.ok) throw new Error();
-    const items = await res.json();
-    renderHistoryGrid(items, grid, false);
-    prevBtn.disabled = historyPage === 0;
-    nextBtn.disabled = items.length < HISTORY_LIMIT;
+    if (historyView === "folders") {
+      backBtn.style.display = "none";
+      const res = await apiFetch(`/user/history/groups?limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
+      if (!res.ok) throw new Error();
+      const groups = await res.json();
+      renderHistoryFolders(groups, grid);
+      prevBtn.disabled = historyPage === 0;
+      nextBtn.disabled = groups.length < HISTORY_LIMIT;
+    } else {
+      backBtn.style.display = "";
+      const res = await apiFetch(`/user/history?job_id=${encodeURIComponent(historyCurrentJob)}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
+      if (!res.ok) throw new Error();
+      const items = await res.json();
+      renderHistoryGrid(items, grid, false);
+      prevBtn.disabled = historyPage === 0;
+      nextBtn.disabled = items.length < HISTORY_LIMIT;
+    }
     pageInfo.textContent = `Trang ${historyPage + 1}`;
   } catch (e) {
     grid.innerHTML = '<div class="empty-state">❌ Lỗi tải lịch sử</div>';
   } finally {
     historyLoading = false;
   }
+}
+
+function renderHistoryFolders(groups, grid) {
+  grid.innerHTML = ""; grid.classList.remove("grid-mode");
+  if (!groups.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
+  groups.forEach(g => {
+    const card = document.createElement("div");
+    card.className = "hist-folder";
+    const time = g.created_at ? new Date(g.created_at + "Z").toLocaleString("vi-VN") : "";
+    card.innerHTML = `
+      <div class="hist-folder-icon">📁</div>
+      <div class="hist-folder-info">
+        <div class="hist-folder-name">${esc(g.batch_name || g.job_id)}</div>
+        <div class="hist-folder-meta">${esc(g.model || "")} · ${g.count} ảnh · ${time}</div>
+      </div>
+      <button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();deleteHistoryJob('${esc(g.job_id)}')" title="Xóa">🗑</button>`;
+    card.onclick = () => openHistoryJob(g.job_id, g.batch_name || g.job_id);
+    grid.appendChild(card);
+  });
+}
+
+function openHistoryJob(jobId, name) {
+  historyView = "images";
+  historyCurrentJob = jobId;
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
+  document.getElementById("historyTitle").textContent = `📁 ${name}`;
+  fetchHistoryPage(false);
+}
+
+function historyGoBack() {
+  historyView = "folders";
+  historyCurrentJob = null;
+  historyPage = 0;
+  document.getElementById("historyTitle").textContent = "📜 Lịch sử tạo ảnh";
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage(false);
+}
+
+async function deleteHistoryJob(jobId) {
+  if (!confirm("Xóa toàn bộ ảnh trong batch này?")) return;
+  try {
+    await apiFetch(`/user/history/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+    fetchHistoryPage(false);
+  } catch (e) { alert("Lỗi xóa"); }
+}
+
+async function deleteHistoryFailed() {
+  if (!confirm("Xóa tất cả lịch sử lỗi (không có ảnh)?")) return;
+  try {
+    await apiFetch("/user/history/failed", { method: "DELETE" });
+    fetchHistoryPage(false);
+  } catch (e) { alert("Lỗi xóa"); }
 }
 
 function historyPrevPage() {
@@ -477,8 +545,8 @@ function historyNextPage() {
 }
 
 function renderHistoryGrid(items, grid, append) {
-  if (!append) grid.innerHTML = "";
-  if (!items.length && !append) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
+  if (!append) { grid.innerHTML = ""; grid.classList.add("grid-mode"); }
+  if (!items.length && !append) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có ảnh</div></div>'; return; }
   items.forEach(item => {
     const card = document.createElement("div");
     card.className = "img-card";
