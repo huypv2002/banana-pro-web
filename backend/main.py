@@ -97,6 +97,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     reference_images: list = None, folder_images: dict = None):
     job = jobs[job_id]
     job["status"] = "running"
+    logger.info(f"[{job_id}] prompts={len(prompts)}, ref_images={len(reference_images or [])}, folder_keys={list((folder_images or {}).keys())}")
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
