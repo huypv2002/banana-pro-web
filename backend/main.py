@@ -108,9 +108,10 @@ def _extract_image_url(result: dict) -> str:
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     model: str, aspect_ratio: str, variants: int,
                     reference_images: list = None, folder_images: dict = None):
+    import threading, queue as _queue, random
     job = jobs[job_id]
     job["status"] = "running"
-    logger.info(f"[{job_id}] prompts={len(prompts)}, ref_images={len(reference_images or [])}, folder_keys={list((folder_images or {}).keys())}")
+    logger.info(f"[{job_id}] prompts={len(prompts)}, variants={variants}, parallel={variants}")
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
@@ -123,7 +124,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         project_id = client.flow_project_id
         aspect = ASPECT_MAP.get(aspect_ratio, "IMAGE_ASPECT_RATIO_LANDSCAPE")
 
-        # Upload reference images (Image-to-Image mode)
+        # Upload reference images
         global_image_inputs = []
         if reference_images:
             for b64 in reference_images:
@@ -143,19 +144,30 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                 except Exception as e:
                     logger.warning(f"Upload ref image failed: {e}")
 
-        for idx, prompt in enumerate(prompts):
-            if job.get("cancelled"):
-                break
-            for _ in range(variants):
-                if job.get("cancelled"):
+        # Build task queue: each task = (global_index, prompt_index, prompt, variant_num)
+        task_queue = _queue.Queue()
+        total = len(prompts) * variants
+        # Results array pre-filled with None
+        results = [None] * total
+        idx = 0
+        for pi, prompt in enumerate(prompts):
+            for v in range(variants):
+                task_queue.put((idx, pi, prompt, v))
+                idx += 1
+
+        lock = threading.Lock()
+
+        def worker(worker_id):
+            while not job.get("cancelled"):
+                try:
+                    task_idx, pi, prompt, v = task_queue.get_nowait()
+                except _queue.Empty:
                     break
                 try:
-                    # Global ref images chỉ cho prompt đầu (multiple mode)
-                    image_inputs = list(global_image_inputs) if idx == 0 and global_image_inputs else []
-
-                    # Per-prompt ref images (normal mode)
+                    # Build image inputs for this prompt
+                    image_inputs = list(global_image_inputs) if pi == 0 and global_image_inputs else []
                     per_prompt_ref = (folder_images or {}).get("__per_prompt_ref", {})
-                    per_imgs = per_prompt_ref.get(str(idx), [])
+                    per_imgs = per_prompt_ref.get(str(pi), [])
                     if per_imgs:
                         for b64 in per_imgs[:3]:
                             try:
@@ -163,38 +175,15 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
                                 ext = 'jpg'
                                 if 'png' in header: ext = 'png'
-                                elif 'webp' in header: ext = 'webp'
                                 with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
                                     f.write(_b64.b64decode(data))
                                     tmp_path = f.name
-                                media_id = client.upload_image(tmp_path)
+                                mid = client.upload_image(tmp_path)
                                 os.unlink(tmp_path)
-                                if media_id:
-                                    image_inputs.append({"name": media_id.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
+                                if mid:
+                                    image_inputs.append({"name": mid.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
                             except Exception:
                                 pass
-
-                    # Folder structure: match ảnh theo tên prompt
-                    if folder_images:
-                        key = prompt.strip().lower()[:30]
-                        for fname, imgs in folder_images.items():
-                            if fname in key or key in fname:
-                                for b64 in imgs[:3]:
-                                    try:
-                                        import tempfile, base64 as _b64
-                                        header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
-                                        ext = 'jpg'
-                                        if 'png' in header: ext = 'png'
-                                        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
-                                            f.write(_b64.b64decode(data))
-                                            tmp_path = f.name
-                                        media_id = client.upload_image(tmp_path)
-                                        os.unlink(tmp_path)
-                                        if media_id:
-                                            image_inputs.append({"name": media_id.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
-                                    except Exception:
-                                        pass
-                                break
 
                     request_item = {
                         "clientContext": {
@@ -204,9 +193,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                             "userPaygateTier": "PAYGATE_TIER_TWO",
                         },
                     }
-                    # ✅ Thêm seed TRƯỚC imageModelName khi có imageInputs (theo curl thật)
                     if image_inputs:
-                        import random
                         request_item["seed"] = random.randint(1, 999999)
                     request_item["imageModelName"] = model
                     request_item["imageAspectRatio"] = aspect
@@ -217,15 +204,40 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     result = client.generate_flow_images([request_item], project_id=project_id)
                     if result:
                         url = _extract_image_url(result)
-                        job["images"].append({"prompt": prompt, "url": url, "model": model})
+                        results[task_idx] = {"prompt": prompt, "url": url, "model": model}
                     else:
-                        job["images"].append({"prompt": prompt, "url": None,
-                                              "error": client.last_error_detail or "Tạo ảnh thất bại"})
+                        results[task_idx] = {"prompt": prompt, "url": None,
+                                             "error": client.last_error_detail or "Tạo ảnh thất bại"}
                 except Exception as e:
-                    job["images"].append({"prompt": prompt, "url": None, "error": str(e)})
+                    results[task_idx] = {"prompt": prompt, "url": None, "error": str(e)}
                 finally:
-                    job["completed"] += 1
+                    with lock:
+                        job["completed"] += 1
+                        # Rebuild images list in order (fill completed ones)
+                        job["images"] = [r if r else {"prompt": "", "url": None, "error": "pending"} for r in results[:job["completed"]]]
+                        # Actually rebuild properly - show all completed in order
+                        ordered = []
+                        for r in results:
+                            if r is not None:
+                                ordered.append(r)
+                        job["images"] = ordered
 
+        # Launch workers with staggered start (3s delay between each)
+        threads = []
+        num_workers = min(variants, total)
+        for w in range(num_workers):
+            t = threading.Thread(target=worker, args=(w,), daemon=True)
+            threads.append(t)
+            t.start()
+            if w < num_workers - 1:
+                time.sleep(3)
+
+        for t in threads:
+            t.join()
+
+        # Final: set all results in order
+        job["images"] = [r if r else {"prompt": "?", "url": None, "error": "Cancelled"} for r in results]
+        job["completed"] = total
         job["status"] = "done"
     except Exception as e:
         logger.error(f"[{job_id}] Fatal: {e}")
