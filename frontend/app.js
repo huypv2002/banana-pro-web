@@ -251,11 +251,6 @@ function loadTxtFile(input) {
   reader.readAsText(file);
 }
 
-async function confirmFolderUpload() {
-  const ok = await sConfirm("Chọn thư mục chứa các file .txt prompt", "📁 Chọn thư mục");
-  if (ok) document.getElementById("folderTxtInput").click();
-}
-
 function loadFolderTxt(input) {
   const files = Array.from(input.files).filter(f => f.name.endsWith(".txt"));
   if (!files.length) return;
