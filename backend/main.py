@@ -30,7 +30,7 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
 executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
 
-PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles")
+PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
 
 def get_active_profile():
     """Get first active profile from PROFILES_DIR, fallback to CHROME_PROFILE_PATH."""
