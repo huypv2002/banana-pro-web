@@ -519,6 +519,34 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         job["error"] = str(e)
 
 
+def _extract_video_urls(obj):
+    """Extract video URLs from poll response (same logic as GUI app)."""
+    def _walk(node, keys):
+        results = []
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in keys and isinstance(v, str):
+                    results.append(v)
+                results.extend(_walk(v, keys))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                results.extend(_walk(item, keys))
+        return results
+
+    candidates = _walk(obj, ("fileUrl", "fifeUrl", "downloadUrl", "uri", "videoUrl", "url"))
+    urls = []
+    for u in candidates:
+        if isinstance(u, str) and u.startswith("http"):
+            lo = u.lower()
+            if any(ext in lo for ext in (".mp4", ".mov", ".webm")):
+                urls.append(u)
+            elif "googleapis.com" in lo or "googleusercontent.com" in lo:
+                urls.append(u)
+            elif "/video/" in lo or "/media/" in lo:
+                urls.append(u)
+    return urls
+
+
 def _poll_video_status(client, operations, job_id, prompt_idx, max_wait=600):
     """Poll video generation status until done or timeout."""
     start = time.time()
@@ -545,25 +573,7 @@ def _poll_video_status(client, operations, job_id, prompt_idx, max_wait=600):
                     failed += 1
 
             if completed + failed >= total:
-                # Extract video URLs
-                urls = []
-                for op in ops:
-                    # Try multiple paths for video URL
-                    op_dict = op.get("operation", {}) if isinstance(op.get("operation"), dict) else {}
-                    metadata = op_dict.get("metadata", {}) or {}
-                    video = metadata.get("video", {}) or {}
-                    url = video.get("uri") or video.get("videoUri") or ""
-                    if not url:
-                        # Try response path
-                        resp = op_dict.get("response", {}) or {}
-                        for v in resp.get("generatedVideos", []):
-                            u = v.get("video", {}).get("uri") or v.get("video", {}).get("videoUri") or ""
-                            if u: url = u; break
-                    if not url:
-                        # Try fileUrl in operation metadata
-                        url = video.get("fileUrl") or metadata.get("fileUrl") or ""
-                    if url:
-                        urls.append(url)
+                urls = _extract_video_urls(status)
                 logger.info(f"[VIDEO {job_id}][{prompt_idx}] Done: {len(urls)} videos ({completed} ok, {failed} fail)")
                 return urls
         except Exception as e:
