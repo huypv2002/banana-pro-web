@@ -123,7 +123,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
     import threading, queue as _queue, random
     job = jobs[job_id]
     job["status"] = "running"
-    logger.info(f"[{job_id}] prompts={len(prompts)}, variants={variants}, parallel={variants}")
+    logger.info(f"[{job_id}] prompts={len(prompts)}, variants={variants}, parallel={variants}, resolution={resolution}")
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
@@ -219,14 +219,19 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                         # Upsample if 2k/4k
                         if url and resolution in ("2k", "4k"):
                             media_id = _extract_media_id(result)
+                            logger.info(f"[{job_id}] Upscale {resolution}: media_id={media_id[:30] if media_id else 'NONE'}...")
                             if media_id:
                                 target = "UPSAMPLE_IMAGE_RESOLUTION_2K" if resolution == "2k" else "UPSAMPLE_IMAGE_RESOLUTION_4K"
-                                logger.info(f"[{job_id}] Upscale {resolution}: {media_id[:20]}...")
                                 up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
                                 if up_result:
                                     up_url = _extract_image_url(up_result)
                                     if up_url:
                                         url = up_url
+                                        logger.info(f"[{job_id}] Upscale OK: {up_url[:60]}...")
+                                    else:
+                                        logger.warning(f"[{job_id}] Upscale: no URL in response")
+                                else:
+                                    logger.warning(f"[{job_id}] Upscale failed: {client.last_error_detail}")
                         results[task_idx] = {"prompt": prompt, "url": url, "model": model}
                     else:
                         results[task_idx] = {"prompt": prompt, "url": None,
