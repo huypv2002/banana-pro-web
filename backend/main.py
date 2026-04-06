@@ -29,7 +29,14 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
 
 executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
-upscaled_store: dict = {}  # {job_id_idx: base64_string}
+upscaled_store: dict = {}  # {key: (base64_string, timestamp)}
+
+def _cleanup_upscaled():
+    """Remove entries older than 10 minutes."""
+    cutoff = time.time() - 600
+    expired = [k for k, v in upscaled_store.items() if v[1] < cutoff]
+    for k in expired:
+        del upscaled_store[k]
 
 PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
 
@@ -227,7 +234,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 if up_result and up_result.get("encodedImage"):
                                     # Store base64 separately, keep original URL for thumbnail
                                     up_key = f"{job_id}_{task_idx}"
-                                    upscaled_store[up_key] = up_result["encodedImage"]
+                                    upscaled_store[up_key] = (up_result["encodedImage"], time.time())
                                     logger.info(f"[{job_id}] Upscale {resolution} OK ({len(up_result['encodedImage'])} chars)")
                         results[task_idx] = {"prompt": prompt, "url": url, "model": model,
                                              "upscaled": f"/upscaled/{job_id}_{task_idx}" if (resolution in ("2k","4k") and f"{job_id}_{task_idx}" in upscaled_store) else None}
@@ -353,10 +360,11 @@ def health():
 def get_upscaled(key: str):
     from fastapi.responses import Response
     import base64 as _b64
-    data = upscaled_store.get(key)
-    if not data:
-        raise HTTPException(404, "Not found")
-    return Response(content=_b64.b64decode(data), media_type="image/jpeg",
+    _cleanup_upscaled()
+    entry = upscaled_store.pop(key, None)
+    if not entry:
+        raise HTTPException(404, "Not found or expired")
+    return Response(content=_b64.b64decode(entry[0]), media_type="image/jpeg",
                     headers={"Content-Disposition": f"attachment; filename={key}.jpg"})
 
 @app.get("/profiles")
