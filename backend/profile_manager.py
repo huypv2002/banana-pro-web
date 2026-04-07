@@ -75,19 +75,22 @@ class ChromeThread(QThread):
             "--password-store=basic",
         ]
         if self.mode == "login":
-            # Đăng nhập: disable extensions để tránh conflict
             args = base_args + [
                 "--disable-extensions",
                 "--disable-signin-promo",
                 "https://labs.google/fx/tools/flow",
             ]
         else:
-            # Extension mode: KHÔNG disable extensions, mở chrome://extensions
-            args = base_args + [
-                "chrome://extensions/",
-            ]
+            # Extension mode: mở Chrome visible, sau đó mở tab chrome://extensions
+            # Dùng 2 lần gọi: lần 1 khởi động, lần 2 mở tab mới
+            args = base_args + ["--new-window", "--start-maximized"]
         try:
             proc = subprocess.Popen(args)
+            if self.mode == "extension":
+                import time
+                time.sleep(2)  # Đợi Chrome khởi động
+                # Mở chrome://extensions trong tab mới bằng cách gọi Chrome lần 2
+                subprocess.Popen([CHROME_PATH, f"--user-data-dir={self.profile_path}", "chrome://extensions/"])
             proc.wait()
         except Exception:
             pass
