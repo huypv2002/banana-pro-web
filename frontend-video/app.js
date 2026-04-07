@@ -689,7 +689,7 @@ function syncPromptSourceUI() {
 
 let historyPage = 0;
 let historyLoading = false;
-const HISTORY_LIMIT = 50;
+const HISTORY_LIMIT = 24;
 let historyView = "folders";
 let historyCurrentJob = null;
 let historyCurrentFile = null;
@@ -788,13 +788,22 @@ function renderVideoHistoryGrid(items, grid) {
     const card = document.createElement("div");
     card.className = "img-card";
     card.innerHTML = `${url ? `<label class="hist-cb"><input type="checkbox" class="hist-select" data-url="${url}"/></label>` : ""}
-      ${url ? `<video src="${url}" controls preload="metadata" style="width:100%;aspect-ratio:16/9;background:#f1f5f9"></video>` : `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div>`}
+      ${url ? `<div class="video-history-preview" onclick="openHistoryVideo('${esc(url)}')"><div class="video-history-play">▶</div><div class="video-history-label">Xem video</div></div>` : `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div>`}
       <div class="img-card-body">
         <div class="img-card-prompt">${esc(item.prompt)}</div>
         <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model || "")} · ${time}</div>
       </div>
       ${url ? `<div class="img-card-actions"><a href="${url}" target="_blank">🔗 Mở</a></div>` : ""}`;
     grid.appendChild(card);
+  });
+}
+
+function openHistoryVideo(url) {
+  Swal.fire({
+    width: "min(960px, 92vw)",
+    showConfirmButton: false,
+    showCloseButton: true,
+    html: `<video src="${url}" controls autoplay preload="none" style="width:100%;max-height:75vh;background:#000;border-radius:12px"></video>`,
   });
 }
 

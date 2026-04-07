@@ -380,6 +380,9 @@ async function ensureHistorySchema(env) {
   try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN file_name TEXT DEFAULT ''").run(); } catch (e) {}
   try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN media_url TEXT").run(); } catch (e) {}
   try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN media_type TEXT DEFAULT 'image'").run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_user_media_job ON gen_history(user_id, media_type, job_id, id DESC)").run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_user_media_file ON gen_history(user_id, media_type, job_id, file_name, id DESC)").run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_cleanup ON gen_history(created_at)").run(); } catch (e) {}
 }
 
 async function getHistoryGroups(request, env, url) {

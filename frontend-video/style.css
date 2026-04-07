@@ -114,6 +114,9 @@ textarea { resize: vertical; }
 .img-card-actions { padding: 6px 10px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
 .img-card-actions a { font-size: 0.74rem; color: var(--blue); text-decoration: none; font-weight: 600; }
 .img-card-actions a:hover { text-decoration: underline; }
+.video-history-preview { width:100%; aspect-ratio:16/9; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; background:linear-gradient(135deg,#0f172a,#1e293b); color:#fff; cursor:pointer; }
+.video-history-play { width:56px; height:56px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.2); font-size:1.25rem; }
+.video-history-label { font-size:0.82rem; font-weight:600; letter-spacing:.2px; }
 
 /* Error */
 .error-msg { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 10px; padding: 10px 14px; color: var(--error); font-size: 0.82rem; }

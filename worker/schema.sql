@@ -49,5 +49,9 @@ CREATE TABLE gen_history (
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE INDEX idx_history_user_media_job ON gen_history(user_id, media_type, job_id, id DESC);
+CREATE INDEX idx_history_user_media_file ON gen_history(user_id, media_type, job_id, file_name, id DESC);
+CREATE INDEX idx_history_cleanup ON gen_history(created_at);
+
 -- Default super admin app-account: adminveo / 30102002
 INSERT INTO users (username, password_hash, role) VALUES ('adminveo', 'cef380b2c74489696d94000c79718ce6da5674ca2041c002a5cedd0f27826933', 'admin');
