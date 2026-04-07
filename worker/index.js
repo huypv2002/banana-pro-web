@@ -344,56 +344,68 @@ async function clearUserCookies(request, env) {
 
 // ── History ──────────────────────────────────────────────────────────────────
 
+async function ensureHistorySchema(env) {
+  try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN file_name TEXT DEFAULT ''").run(); } catch (e) {}
+  try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN media_url TEXT").run(); } catch (e) {}
+  try { await env.DB.prepare("ALTER TABLE gen_history ADD COLUMN media_type TEXT DEFAULT 'image'").run(); } catch (e) {}
+}
+
 async function getHistoryGroups(request, env, url) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureHistorySchema(env);
   // Auto-cleanup history older than 24h
   await env.DB.prepare("DELETE FROM gen_history WHERE created_at < datetime('now','-24 hours')").run();
   const limit = parseInt(url.searchParams.get("limit") || "50");
   const offset = parseInt(url.searchParams.get("offset") || "0");
+  const mediaType = url.searchParams.get("media_type") || "image";
   const { results } = await env.DB.prepare(
     `SELECT job_id, COALESCE(batch_name,'') as batch_name, model, COUNT(*) as count, MAX(created_at) as created_at
-     FROM gen_history WHERE user_id=? AND image_url IS NOT NULL AND image_url!=''
+     FROM gen_history WHERE user_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
      GROUP BY job_id ORDER BY MAX(id) DESC LIMIT ? OFFSET ?`
-  ).bind(user.user_id, limit, offset).all();
+  ).bind(user.user_id, mediaType, limit, offset).all();
   return json(results);
 }
 
 async function getHistorySubgroups(request, env, url) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureHistorySchema(env);
   const jobId = url.searchParams.get("job_id");
+  const mediaType = url.searchParams.get("media_type") || "image";
   if (!jobId) return err("Missing job_id");
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(file_name,'') as file_name, COUNT(*) as count, MAX(created_at) as created_at
-     FROM gen_history WHERE user_id=? AND job_id=? AND image_url IS NOT NULL AND image_url!=''
+     FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
      GROUP BY file_name ORDER BY MIN(id)`
-  ).bind(user.user_id, jobId).all();
+  ).bind(user.user_id, jobId, mediaType).all();
   return json(results);
 }
 
 async function getUserHistory(request, env, url) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureHistorySchema(env);
   const limit = parseInt(url.searchParams.get("limit") || "100");
   const offset = parseInt(url.searchParams.get("offset") || "0");
   const jobId = url.searchParams.get("job_id");
   const fileName = url.searchParams.get("file_name");
+  const mediaType = url.searchParams.get("media_type") || "image";
   if (jobId && fileName !== null) {
     const { results } = await env.DB.prepare(
-      "SELECT id,prompt,model,image_url,created_at FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(file_name,'')=? AND image_url IS NOT NULL AND image_url!='' ORDER BY id LIMIT ? OFFSET ?"
-    ).bind(user.user_id, jobId, fileName || "", limit, offset).all();
+      "SELECT id,prompt,model,image_url,COALESCE(media_url,image_url) as media_url,COALESCE(media_type,'image') as media_type,created_at FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(file_name,'')=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!='' ORDER BY id LIMIT ? OFFSET ?"
+    ).bind(user.user_id, jobId, fileName || "", mediaType, limit, offset).all();
     return json(results);
   }
   if (jobId) {
     const { results } = await env.DB.prepare(
-      "SELECT id,job_id,prompt,model,image_url,created_at FROM gen_history WHERE user_id=? AND job_id=? AND image_url IS NOT NULL AND image_url!='' ORDER BY id DESC LIMIT ? OFFSET ?"
-    ).bind(user.user_id, jobId, limit, offset).all();
+      "SELECT id,job_id,prompt,model,image_url,COALESCE(media_url,image_url) as media_url,COALESCE(media_type,'image') as media_type,created_at FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!='' ORDER BY id DESC LIMIT ? OFFSET ?"
+    ).bind(user.user_id, jobId, mediaType, limit, offset).all();
     return json(results);
   }
   const { results } = await env.DB.prepare(
-    "SELECT id,job_id,prompt,model,image_url,created_at FROM gen_history WHERE user_id=? AND image_url IS NOT NULL AND image_url!='' ORDER BY id DESC LIMIT ? OFFSET ?"
-  ).bind(user.user_id, limit, offset).all();
+    "SELECT id,job_id,prompt,model,image_url,COALESCE(media_url,image_url) as media_url,COALESCE(media_type,'image') as media_type,created_at FROM gen_history WHERE user_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!='' ORDER BY id DESC LIMIT ? OFFSET ?"
+  ).bind(user.user_id, mediaType, limit, offset).all();
   return json(results);
 }
 
@@ -408,19 +420,31 @@ async function deleteHistoryJob(request, env, path) {
 async function deleteHistoryFailed(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
-  await env.DB.prepare("DELETE FROM gen_history WHERE user_id=? AND (image_url IS NULL OR image_url='')").bind(user.user_id).run();
+  await ensureHistorySchema(env);
+  const mediaType = new URL(request.url).searchParams.get("media_type");
+  if (mediaType) {
+    await env.DB.prepare("DELETE FROM gen_history WHERE user_id=? AND COALESCE(media_type,'image')=? AND (COALESCE(media_url,image_url) IS NULL OR COALESCE(media_url,image_url)='')").bind(user.user_id, mediaType).run();
+  } else {
+    await env.DB.prepare("DELETE FROM gen_history WHERE user_id=? AND (COALESCE(media_url,image_url) IS NULL OR COALESCE(media_url,image_url)='')").bind(user.user_id).run();
+  }
   return json({ ok: true });
 }
 
 async function saveHistory(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureHistorySchema(env);
   const { items } = await request.json();
   if (!items?.length) return err("Không có dữ liệu");
   const stmt = env.DB.prepare(
-    "INSERT INTO gen_history(user_id,job_id,prompt,model,image_url,batch_name,file_name) VALUES(?,?,?,?,?,?,?)"
+    "INSERT INTO gen_history(user_id,job_id,prompt,model,image_url,media_url,media_type,batch_name,file_name) VALUES(?,?,?,?,?,?,?,?,?)"
   );
-  const batch = items.map(i => stmt.bind(user.user_id, i.job_id || "", i.prompt || "", i.model || "", i.image_url || null, i.batch_name || "", i.file_name || ""));
+  const batch = items.map(i => {
+    const mediaType = i.media_type || (i.video_url ? "video" : "image");
+    const mediaUrl = i.media_url || i.video_url || i.image_url || null;
+    const imageUrl = mediaType === "image" ? (i.image_url || mediaUrl) : null;
+    return stmt.bind(user.user_id, i.job_id || "", i.prompt || "", i.model || "", imageUrl, mediaUrl, mediaType, i.batch_name || "", i.file_name || "");
+  });
   await env.DB.batch(batch);
   return json({ ok: true, saved: items.length });
 }

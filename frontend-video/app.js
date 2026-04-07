@@ -129,6 +129,7 @@ function showApp() {
   else if (authUser.plan_active) { const days = Math.ceil((new Date(authUser.plan_expires_at) - new Date()) / 86400000); planEl.textContent = `📦 Còn ${days} ngày`; planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active"); }
   else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   loadCookiesFromDB();
+  showTab("generate");
 }
 function clearAuth() { authToken = ""; authUser = null; localStorage.removeItem("bp_token"); localStorage.removeItem("bp_user"); }
 function logout() { clearAuth(); showLogin(); }
@@ -152,6 +153,14 @@ async function handleAuth(e) {
     showApp();
   } catch (e) { errEl.textContent = "Lỗi kết nối"; errEl.style.display = "block"; }
   return false;
+}
+
+function showTab(tab) {
+  document.getElementById("tabGenerate").style.display = tab === "generate" ? "" : "none";
+  document.getElementById("tabHistory").style.display = tab === "history" ? "" : "none";
+  document.getElementById("navGenerate").classList.toggle("active", tab === "generate");
+  document.getElementById("navHistory").classList.toggle("active", tab === "history");
+  if (tab === "history") loadHistory();
 }
 
 // ── Video Mode ──
@@ -481,7 +490,13 @@ function startPolling() {
         updateResults(job);
       }
       if (job.status === "done" || job.status === "error") {
-        clearInterval(pollInterval); currentJobId = null; resetUI();
+        clearInterval(pollInterval);
+        const finishedJobId = currentJobId;
+        const finishedMode = activeJobMode;
+        if (job.status === "done" && job.videos?.length) {
+          saveVideoHistory(job, finishedJobId, finishedMode).catch(() => {});
+        }
+        currentJobId = null; resetUI();
         if (job.status === "error") sAlert(job.error || "Lỗi", "error");
         else sSuccess(`Hoàn thành ${job.completed} prompt!`);
       }
@@ -515,6 +530,41 @@ function clearProgressUI() {
   if (statusBadge) {
     statusBadge.className = "";
     statusBadge.textContent = "";
+  }
+}
+
+function getBatchNameForMode(mode) {
+  const strip = n => n.replace(/\.txt$/i, "");
+  const files = modeBatchFiles[mode] || [];
+  const names = files.map(f => strip(f.name));
+  return names.length ? names.join(", ") : "Untitled";
+}
+
+function getPromptFileMapForMode(mode) {
+  const strip = n => n.replace(/\.txt$/i, "");
+  const files = modeBatchFiles[mode] || [];
+  const map = [];
+  files.forEach(f => f.prompts.forEach(() => map.push(strip(f.name))));
+  return map;
+}
+
+async function saveVideoHistory(job, jobId, mode) {
+  const promptFileMap = getPromptFileMapForMode(mode);
+  const batchName = getBatchNameForMode(mode);
+  const items = (job.videos || []).flatMap((video, idx) => {
+    if (!video?.urls?.length) return [];
+    return video.urls.map(url => ({
+      job_id: jobId,
+      prompt: video.prompt || "",
+      model: video.model || "",
+      video_url: url,
+      media_type: "video",
+      batch_name: batchName,
+      file_name: promptFileMap[idx] || "",
+    }));
+  });
+  if (items.length) {
+    await apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items }) });
   }
 }
 
@@ -640,3 +690,231 @@ function syncPromptSourceUI() {
   document.getElementById("txtFilePath").value = sourcePaths.txt || "";
   document.getElementById("folderTxtPath").value = sourcePaths.folder || "";
 }
+
+let historyPage = 0;
+let historyLoading = false;
+const HISTORY_LIMIT = 50;
+let historyView = "folders";
+let historyCurrentJob = null;
+let historyCurrentFile = null;
+let historyBreadcrumb = [];
+
+async function loadHistory() {
+  historyPage = 0;
+  historyView = "folders";
+  historyCurrentJob = null;
+  historyCurrentFile = null;
+  document.getElementById("historySelectAll").checked = false;
+  await fetchHistoryPage();
+}
+
+async function fetchHistoryPage() {
+  if (historyLoading) return;
+  historyLoading = true;
+  const grid = document.getElementById("historyGrid");
+  const prevBtn = document.getElementById("historyPrev");
+  const nextBtn = document.getElementById("historyNext");
+  const pageInfo = document.getElementById("historyPageInfo");
+  grid.innerHTML = '<div class="empty-state">⏳ Đang tải...</div>';
+  updateHistoryBreadcrumb();
+  try {
+    if (historyView === "folders") {
+      const res = await apiFetch(`/user/history/groups?media_type=video&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
+      if (!res.ok) throw new Error();
+      const groups = await res.json();
+      renderHistoryFolders(groups, grid, "📁", g => g.batch_name || g.job_id, g => `${g.model || ""} · ${g.count} video`, g => openHistoryJob(g.job_id, g.batch_name || g.job_id), g => deleteHistoryJob(g.job_id));
+      prevBtn.disabled = historyPage === 0;
+      nextBtn.disabled = groups.length < HISTORY_LIMIT;
+    } else if (historyView === "files") {
+      const res = await apiFetch(`/user/history/subgroups?media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}`);
+      if (!res.ok) throw new Error();
+      const subs = await res.json();
+      if (subs.length <= 1) {
+        historyView = "videos";
+        historyCurrentFile = subs[0]?.file_name || "";
+        historyLoading = false;
+        return fetchHistoryPage();
+      }
+      renderHistoryFolders(subs, grid, "📄", s => s.file_name || "Untitled", s => `${s.count} video`, s => openHistoryFile(s.file_name), null);
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+    } else {
+      const qs = `media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}&file_name=${encodeURIComponent(historyCurrentFile || "")}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`;
+      const res = await apiFetch(`/user/history?${qs}`);
+      if (!res.ok) throw new Error();
+      const items = await res.json();
+      renderVideoHistoryGrid(items, grid);
+      prevBtn.disabled = historyPage === 0;
+      nextBtn.disabled = items.length < HISTORY_LIMIT;
+    }
+    pageInfo.textContent = `Trang ${historyPage + 1}`;
+  } catch (e) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Lỗi tải lịch sử</div></div>';
+  } finally {
+    historyLoading = false;
+  }
+}
+
+function renderHistoryFolders(items, grid, icon, getName, getMeta, onClick, onDelete) {
+  grid.innerHTML = "";
+  grid.classList.remove("grid-mode");
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>';
+    return;
+  }
+  items.forEach((item, i) => {
+    const card = document.createElement("div");
+    card.className = "hist-folder";
+    const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+    const delId = item.job_id || item.file_name || i;
+    const delBtn = onDelete ? `<button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();deleteHistoryJob('${esc(delId)}')" title="Xóa">🗑</button>` : "";
+    card.innerHTML = `
+      <div class="hist-folder-icon">${icon}</div>
+      <div class="hist-folder-info">
+        <div class="hist-folder-name">${esc(getName(item))}</div>
+        <div class="hist-folder-meta">${esc(getMeta(item))} · ${time}</div>
+      </div>${delBtn}`;
+    card.onclick = () => onClick(item);
+    grid.appendChild(card);
+  });
+}
+
+function renderVideoHistoryGrid(items, grid) {
+  grid.innerHTML = "";
+  grid.classList.add("grid-mode");
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">🎬</div><div>Chưa có video</div></div>';
+    return;
+  }
+  items.forEach(item => {
+    const url = item.media_url || item.video_url || item.image_url;
+    const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+    const card = document.createElement("div");
+    card.className = "img-card";
+    card.innerHTML = `${url ? `<label class="hist-cb"><input type="checkbox" class="hist-select" data-url="${url}"/></label>` : ""}
+      ${url ? `<video src="${url}" controls preload="metadata" style="width:100%;aspect-ratio:16/9;background:#f1f5f9"></video>` : `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div>`}
+      <div class="img-card-body">
+        <div class="img-card-prompt">${esc(item.prompt)}</div>
+        <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model || "")} · ${time}</div>
+      </div>
+      ${url ? `<div class="img-card-actions"><a href="${url}" target="_blank">🔗 Mở</a></div>` : ""}`;
+    grid.appendChild(card);
+  });
+}
+
+function updateHistoryBreadcrumb() {
+  const el = document.getElementById("historyTitle");
+  const backBtn = document.getElementById("historyBack");
+  if (historyView === "folders") {
+    el.textContent = "📜 Lịch sử tạo video";
+    backBtn.style.display = "none";
+  } else {
+    backBtn.style.display = "";
+    const parts = ["📜 Lịch sử", historyBreadcrumb[0] || "", historyView === "videos" ? (historyCurrentFile || "") : ""].filter(Boolean);
+    el.textContent = parts.join(" › ");
+  }
+}
+
+function openHistoryJob(jobId, name) {
+  historyView = "files";
+  historyCurrentJob = jobId;
+  historyCurrentFile = null;
+  historyBreadcrumb = [name];
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage();
+}
+
+function openHistoryFile(fileName) {
+  historyView = "videos";
+  historyCurrentFile = fileName;
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage();
+}
+
+function historyGoBack() {
+  if (historyView === "videos" && historyCurrentFile !== null) {
+    historyView = "files";
+    historyCurrentFile = null;
+  } else {
+    historyView = "folders";
+    historyCurrentJob = null;
+    historyCurrentFile = null;
+    historyBreadcrumb = [];
+  }
+  historyPage = 0;
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage();
+}
+
+async function deleteHistoryJob(jobId) {
+  if (!await sConfirm("Xóa toàn bộ video trong batch này?")) return;
+  await apiFetch(`/user/history/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+  fetchHistoryPage();
+}
+
+async function deleteHistoryFailed() {
+  if (!await sConfirm("Xóa lịch sử lỗi?")) return;
+  await apiFetch("/user/history/failed?media_type=video", { method: "DELETE" });
+  fetchHistoryPage();
+}
+
+function historyPrevPage() {
+  if (historyPage > 0) {
+    historyPage--;
+    document.getElementById("historySelectAll").checked = false;
+    fetchHistoryPage();
+  }
+}
+
+function historyNextPage() {
+  historyPage++;
+  document.getElementById("historySelectAll").checked = false;
+  fetchHistoryPage();
+}
+
+function historyToggleAll(checked) {
+  document.querySelectorAll("#historyGrid .hist-select").forEach(cb => cb.checked = checked);
+}
+
+function getHistoryUrls(selectedOnly) {
+  const selector = selectedOnly ? "#historyGrid .hist-select:checked" : "#historyGrid .hist-select";
+  return [...document.querySelectorAll(selector)].map(cb => cb.dataset.url).filter(Boolean);
+}
+
+async function historyDownloadZip(urls, btnId) {
+  if (!urls.length) { sAlert("Không có video để tải"); return; }
+  const btn = document.getElementById(btnId);
+  const old = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Đang gom..."; }
+  try {
+    if (!window.JSZip) {
+      await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+    }
+    const zip = new JSZip();
+    let idx = 0;
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const ext = blob.type?.includes("webm") ? "webm" : blob.type?.includes("quicktime") ? "mov" : "mp4";
+        zip.file(`video_${String(++idx).padStart(3, "0")}.${ext}`, blob);
+      } catch (e) {}
+    }
+    if (!idx) { sAlert("Không tải được video nào"); return; }
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content);
+    a.download = `video_history_${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    sAlert("Lỗi tải ZIP: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+function historyDownloadAll() { historyDownloadZip(getHistoryUrls(false), "histDlAll"); }
+function historyDownloadSelected() { historyDownloadZip(getHistoryUrls(true), "histDlSel"); }

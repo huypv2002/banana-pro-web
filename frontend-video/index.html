@@ -36,6 +36,10 @@
     <span class="logo">🎬</span>
     <span class="app-name">Banana Pro Video</span>
   </div>
+  <nav class="header-nav">
+    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">🎬 Tạo video</button>
+    <button class="nav-btn" onclick="showTab('history')" id="navHistory">📜 Lịch sử</button>
+  </nav>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
@@ -44,6 +48,7 @@
   </div>
 </header>
 
+<div id="tabGenerate" class="tab-content">
 <div class="main-layout">
 <!-- LEFT PANEL -->
 <div class="left-panel">
@@ -157,6 +162,33 @@
   </div>
 </div>
 </div>
+</div>
+</div>
+
+<div id="tabHistory" class="tab-content" style="display:none">
+  <div class="history-container">
+    <div class="history-header">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">← Quay lại</button>
+        <h2 id="historyTitle">📜 Lịch sử tạo video</h2>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-blue" onclick="loadHistory()">🔄 Làm mới</button>
+        <button class="btn btn-red" onclick="deleteHistoryFailed()">🗑 Xóa lỗi</button>
+        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">⬇ Tải tất cả (ZIP)</button>
+        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">⬇ Tải đã chọn</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="historySelectAll" onchange="historyToggleAll(this.checked)"/> Chọn tất cả</label>
+      </div>
+    </div>
+    <div id="historyGrid" class="results-grid">
+      <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+    </div>
+    <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px">
+      <button class="btn btn-ghost" id="historyPrev" onclick="historyPrevPage()" disabled>← Trước</button>
+      <span id="historyPageInfo" style="font-size:0.82rem;color:var(--muted)">Trang 1</span>
+      <button class="btn btn-ghost" id="historyNext" onclick="historyNextPage()" disabled>Sau →</button>
+    </div>
+  </div>
 </div>
 
 <!-- COOKIE MODAL -->
