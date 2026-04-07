@@ -429,14 +429,12 @@ def cancel_job(job_id: str):
 # ── Video Generation ──────────────────────────────────────────────────────────
 
 VIDEO_MODEL_MAP = {
-    # T2V — base keys, aspect được resolve bởi _get_effective_model
     "t2v_low_16_9":     "veo_3_1_t2v_fast_ultra_relaxed",
     "t2v_fast_16_9":    "veo_3_1_t2v_fast_ultra",
     "t2v_quality_16_9": "veo_3_1_t2v",
-    "t2v_low_9_16":     "veo_3_1_t2v_fast_ultra_relaxed",   # _get_effective_model sẽ map sang portrait
+    "t2v_low_9_16":     "veo_3_1_t2v_fast_ultra_relaxed",
     "t2v_fast_9_16":    "veo_3_1_t2v_fast_ultra",
     "t2v_quality_9_16": "veo_3_1_t2v",
-    # Legacy
     "low_fast_16_9":    "veo_3_1_t2v_fast_ultra_relaxed",
     "fast_16_9":        "veo_3_1_t2v_fast_ultra",
     "quality_16_9":     "veo_3_1_t2v",
@@ -446,26 +444,46 @@ VIDEO_MODEL_MAP = {
 }
 
 VIDEO_I2V_MODEL_MAP = {
-    # I2V — base keys, aspect được resolve bởi _get_effective_model
     "i2v_low_16_9":     "veo_3_1_i2v_s_fast_ultra_relaxed",
     "i2v_fast_16_9":    "veo_3_1_i2v_s_fast_ultra",
     "i2v_quality_16_9": "veo_3_1_i2v_s",
-    "i2v_low_9_16":     "veo_3_1_i2v_s_fast_ultra_relaxed",  # _get_effective_model → portrait
+    "i2v_low_9_16":     "veo_3_1_i2v_s_fast_ultra_relaxed",
     "i2v_fast_9_16":    "veo_3_1_i2v_s_fast_ultra",
     "i2v_quality_9_16": "veo_3_1_i2v_s",
-    # Legacy
     "fast_i2v":         "veo_3_1_i2v_s_fast_ultra",
     "quality_i2v":      "veo_3_1_i2v_s",
+}
+
+VIDEO_FL_MODEL_MAP = {
+    # Start+End (first+last frame)
+    "fl_low_16_9":     "veo_3_1_i2v_s_fast_ultra_relaxed",
+    "fl_fast_16_9":    "veo_3_1_i2v_s_fast_ultra_fl",
+    "fl_quality_16_9": "veo_3_1_i2v_s_landscape_fl",
+    "fl_low_9_16":     "veo_3_1_i2v_s_fast_ultra_relaxed",
+    "fl_fast_9_16":    "veo_3_1_i2v_s_fast_portrait_ultra_fl",
+    "fl_quality_9_16": "veo_3_1_i2v_s_portrait_fl",
+}
+
+VIDEO_R2V_MODEL_MAP = {
+    # Reference to video
+    "r2v_low_16_9":  "veo_3_1_r2v_fast_landscape_ultra_relaxed",
+    "r2v_fast_16_9": "veo_3_1_r2v_fast_landscape_ultra",
+    "r2v_low_9_16":  "veo_3_1_r2v_fast_portrait_ultra_relaxed",
+    "r2v_fast_9_16": "veo_3_1_r2v_fast_portrait_ultra",
 }
 
 class VideoGenerateRequest(BaseModel):
     cookie: str = ""
     prompts: List[str]
-    model: str = "fast_16_9"          # T2V model (legacy)
-    t2v_model: str = "fast_16_9"
-    i2v_model: str = "fast_i2v"
+    mode: str = "t2v"              # t2v | i2v | fl | r2v
+    model: str = "t2v_fast_16_9"  # model key cho mode đang dùng
     num_videos: int = 1
-    ref_images: dict = {}              # {promptIndex: base64} — nếu có → dùng I2V
+    # Per-prompt images: {promptIndex: base64}
+    ref_images: dict = {}          # i2v: start image; r2v: reference image
+    end_images: dict = {}          # fl: end image (start = ref_images)
+    # Legacy fields
+    t2v_model: str = ""
+    i2v_model: str = ""
 
 class VideoFromImageRequest(BaseModel):
     cookie: str = ""
@@ -479,15 +497,17 @@ async def generate_video(req: VideoGenerateRequest):
     if not req.prompts:
         raise HTTPException(400, "Cần ít nhất 1 prompt")
     req.num_videos = max(1, min(4, req.num_videos))
-    # Support legacy `model` field
-    t2v = req.t2v_model or req.model
+    # Legacy compat
+    if not req.model or req.model == "fast_16_9":
+        if req.t2v_model: req.model = req.t2v_model
+        elif req.i2v_model: req.model = req.i2v_model; req.mode = "i2v"
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts),
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_video_generation,
-                         job_id, req.cookie, req.prompts, t2v, req.i2v_model,
-                         req.num_videos, req.ref_images or {})
+                         job_id, req.cookie, req.prompts, req.mode, req.model,
+                         req.num_videos, req.ref_images or {}, req.end_images or {})
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 
@@ -515,13 +535,32 @@ def get_video_job(job_id: str):
             "completed": job["completed"], "videos": job.get("videos", []), "error": job.get("error")}
 
 
+def _upload_b64(client, b64: str) -> str:
+    import tempfile, base64 as _b64
+    header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
+    ext = 'png' if 'png' in header else 'jpg'
+    with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
+        f.write(_b64.b64decode(data)); tmp = f.name
+    mid = client.upload_image(tmp)
+    os.unlink(tmp)
+    if not mid:
+        raise ValueError("Upload ảnh thất bại: " + (client.last_error_detail or ""))
+    return mid
+
+
 def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
-                          t2v_model: str, i2v_model: str, num_videos: int,
-                          ref_images: dict = None):
+                          mode: str, model: str, num_videos: int,
+                          ref_images: dict = None, end_images: dict = None):
     job = jobs[job_id]
     job["status"] = "running"
     ref_images = ref_images or {}
-    logger.info(f"[VIDEO {job_id}] prompts={len(prompts)}, t2v={t2v_model}, i2v={i2v_model}, num_videos={num_videos}")
+    end_images = end_images or {}
+    is_portrait = "9_16" in model
+    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if is_portrait else "VIDEO_ASPECT_RATIO_LANDSCAPE"
+    MAP = {"t2v": VIDEO_MODEL_MAP, "i2v": VIDEO_I2V_MODEL_MAP,
+           "fl": VIDEO_FL_MODEL_MAP, "r2v": VIDEO_R2V_MODEL_MAP}
+    model_key = MAP.get(mode, VIDEO_MODEL_MAP).get(model, "veo_3_1_t2v_fast_ultra")
+    logger.info(f"[VIDEO {job_id}] mode={mode}, key={model_key}, aspect={aspect}, prompts={len(prompts)}")
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
@@ -529,115 +568,51 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         client = LabsFlowClient(cookies, profile_path=get_active_profile())
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token.")
-
         project_id = client.flow_project_id
-        t2v_key = VIDEO_MODEL_MAP.get(t2v_model, "veo_3_1_t2v_fast_ultra")
-        i2v_key = VIDEO_I2V_MODEL_MAP.get(i2v_model, "veo_3_1_i2v_s_fast_ultra")
+
         for idx, prompt in enumerate(prompts):
             if job.get("cancelled"):
                 break
-            ref_b64 = ref_images.get(str(idx))
             try:
-                if ref_b64:
-                    # I2V: upload image then generate
-                    import tempfile, base64 as _b64
-                    header, data = ref_b64.split(',', 1) if ',' in ref_b64 else ('', ref_b64)
-                    ext = 'png' if 'png' in header else 'jpg'
-                    with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
-                        f.write(_b64.b64decode(data))
-                        tmp_path = f.name
-                    media_id = client.upload_image(tmp_path)
-                    os.unlink(tmp_path)
-                    if not media_id:
-                        raise ValueError("Upload ảnh thất bại: " + (client.last_error_detail or ""))
-                    # Detect aspect từ model key name (9_16 → portrait)
-                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "9_16" in i2v_model else "VIDEO_ASPECT_RATIO_LANDSCAPE"
-                    logger.info(f"[VIDEO {job_id}] [{idx+1}] I2V ({i2v_key}, {aspect}): {prompt[:50]}...")
-                    result = client.generate_videos_from_image(
-                        project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                        prompt=prompt, media_id=media_id, model_key=i2v_key, num_videos=num_videos,
-                        aspect_ratio=aspect,
-                    )
-                    mode = "i2v"
-                else:
-                    # T2V
-                    aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if "9_16" in t2v_model else "VIDEO_ASPECT_RATIO_LANDSCAPE"
-                    logger.info(f"[VIDEO {job_id}] [{idx+1}] T2V ({t2v_key}, {aspect}): {prompt[:50]}...")
+                ref_b64 = ref_images.get(str(idx))
+                end_b64 = end_images.get(str(idx))
+                if mode == "t2v":
                     result = client.generate_videos(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                        prompt=prompt, model_key=t2v_key, num_videos=num_videos, aspect_ratio=aspect,
-                    )
-                    mode = "t2v"
+                        prompt=prompt, model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
+                elif mode == "i2v":
+                    if not ref_b64: raise ValueError("Prompt này chưa có ảnh Start")
+                    result = client.generate_videos_from_image(
+                        project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
+                        prompt=prompt, media_id=_upload_b64(client, ref_b64),
+                        model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
+                elif mode == "fl":
+                    if not ref_b64 or not end_b64: raise ValueError("Cần cả ảnh Start và End")
+                    result = client.generate_videos_from_start_end(
+                        project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
+                        prompt=prompt, start_media_id=_upload_b64(client, ref_b64),
+                        end_media_id=_upload_b64(client, end_b64),
+                        model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
+                elif mode == "r2v":
+                    if not ref_b64: raise ValueError("Prompt này chưa có ảnh tham chiếu")
+                    result = client.generate_videos(
+                        project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
+                        prompt=prompt, model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
+                else:
+                    raise ValueError(f"Mode không hợp lệ: {mode}")
 
                 if result:
-                    operations = result if isinstance(result, list) else [result]
-                    video_urls = _poll_video_status(client, operations, job_id, idx)
-                    job["videos"].append({"prompt": prompt, "urls": video_urls, "mode": mode})
+                    urls = _poll_video_status(client, result if isinstance(result, list) else [result], job_id, idx)
+                    job["videos"].append({"prompt": prompt, "urls": urls, "mode": mode})
                 else:
-                    job["videos"].append({"prompt": prompt, "urls": [], "error": client.last_error_detail or "Tạo video thất bại"})
+                    job["videos"].append({"prompt": prompt, "urls": [], "error": client.last_error_detail or "Thất bại"})
             except Exception as e:
                 job["videos"].append({"prompt": prompt, "urls": [], "error": str(e)})
             finally:
                 job["completed"] += 1
-
         job["status"] = "done"
     except Exception as e:
         logger.error(f"[VIDEO {job_id}] Fatal: {e}")
-        job["status"] = "error"
-        job["error"] = str(e)
-
-
-def _run_video_from_image(job_id: str, cookie: str, prompts: List[str],
-                          image_b64: str, model: str, num_videos: int):
-    job = jobs[job_id]
-    job["status"] = "running"
-    logger.info(f"[I2V {job_id}] prompts={len(prompts)}, model={model}, num_videos={num_videos}")
-    try:
-        cookies = _parse_cookie_input(cookie)
-        if not cookies:
-            raise ValueError("Cookie không hợp lệ.")
-        client = LabsFlowClient(cookies, profile_path=get_active_profile())
-        if not client.fetch_access_token():
-            raise ValueError("Không thể lấy access token.")
-
-        project_id = client.flow_project_id
-        model_key = VIDEO_I2V_MODEL_MAP.get(model, "veo_3_1_i2v_s_fast_ultra")
-
-        # Upload image once
-        import tempfile, base64 as _b64
-        header, data = image_b64.split(',', 1) if ',' in image_b64 else ('', image_b64)
-        ext = 'png' if 'png' in header else 'jpg'
-        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
-            f.write(_b64.b64decode(data))
-            tmp_path = f.name
-        media_id = client.upload_image(tmp_path)
-        os.unlink(tmp_path)
-        if not media_id:
-            raise ValueError("Upload ảnh thất bại: " + (client.last_error_detail or ""))
-
-        for idx, prompt in enumerate(prompts):
-            if job.get("cancelled"):
-                break
-            try:
-                logger.info(f"[I2V {job_id}] [{idx+1}/{len(prompts)}] {prompt[:50]}...")
-                result = client.generate_videos_from_image(
-                    project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                    prompt=prompt, media_id=media_id, model_key=model_key, num_videos=num_videos,
-                )
-                if result:
-                    operations = result if isinstance(result, list) else [result]
-                    video_urls = _poll_video_status(client, operations, job_id, idx)
-                    job["videos"].append({"prompt": prompt, "urls": video_urls, "model": model})
-                else:
-                    job["videos"].append({"prompt": prompt, "urls": [], "error": client.last_error_detail or "Tạo video thất bại"})
-            except Exception as e:
-                job["videos"].append({"prompt": prompt, "urls": [], "error": str(e)})
-            finally:
-                job["completed"] += 1
-
-        job["status"] = "done"
-    except Exception as e:
-        logger.error(f"[I2V {job_id}] Fatal: {e}")
         job["status"] = "error"
         job["error"] = str(e)
 

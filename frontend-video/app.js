@@ -12,8 +12,80 @@ let batchFiles = [];
 let currentJobId = null;
 let pollInterval = null;
 let pollFailCount = 0;
-let rowRefImages = {}; // {rowIndex: base64string} — 1 ảnh per row (I2V chỉ cần 1)
+let currentMode = "t2v";
+let rowRefImages = {};  // {idx: base64} — start/ref image
+let endRowImages = {};  // {idx: base64} — end image (FL mode only)
 let refImportTargetRow = -1;
+let endImportTargetRow = -1;
+
+const MODE_CONFIG = {
+  t2v: {
+    desc: "📝 Text → Video: Tạo video từ prompt văn bản",
+    refLabel: null,
+    endLabel: null,
+    models: [
+      { group: "🌄 Landscape (16:9)", opts: [
+        { v: "t2v_low_16_9",     l: "Low Fast 16:9 – 0 credits" },
+        { v: "t2v_fast_16_9",    l: "Fast 16:9 – 10 credits", sel: true },
+        { v: "t2v_quality_16_9", l: "Quality 16:9 – 100 credits" },
+      ]},
+      { group: "📱 Portrait (9:16)", opts: [
+        { v: "t2v_low_9_16",     l: "Low Fast 9:16 – 0 credits" },
+        { v: "t2v_fast_9_16",    l: "Fast 9:16 – 10 credits" },
+        { v: "t2v_quality_9_16", l: "Quality 9:16 – 100 credits" },
+      ]},
+    ],
+  },
+  i2v: {
+    desc: "🖼 Image → Video: Ảnh làm frame đầu, video chuyển động từ đó",
+    refLabel: "🖼 Start",
+    endLabel: null,
+    models: [
+      { group: "🌄 Landscape (16:9)", opts: [
+        { v: "i2v_low_16_9",     l: "Low Fast 16:9 – 0 credits" },
+        { v: "i2v_fast_16_9",    l: "Fast 16:9 – 10 credits", sel: true },
+        { v: "i2v_quality_16_9", l: "Quality 16:9 – 100 credits" },
+      ]},
+      { group: "📱 Portrait (9:16)", opts: [
+        { v: "i2v_low_9_16",     l: "Low Fast 9:16 – 0 credits" },
+        { v: "i2v_fast_9_16",    l: "Fast 9:16 – 10 credits" },
+        { v: "i2v_quality_9_16", l: "Quality 9:16 – 100 credits" },
+      ]},
+    ],
+  },
+  fl: {
+    desc: "🎞 First+Last → Video: Ảnh đầu & cuối, AI tạo chuyển động giữa",
+    refLabel: "🎬 Start",
+    endLabel: "🏁 End",
+    models: [
+      { group: "🌄 Landscape (16:9)", opts: [
+        { v: "fl_low_16_9",     l: "Low Fast 16:9 – 0 credits" },
+        { v: "fl_fast_16_9",    l: "Fast 16:9 – 10 credits", sel: true },
+        { v: "fl_quality_16_9", l: "Quality 16:9 – 100 credits" },
+      ]},
+      { group: "📱 Portrait (9:16)", opts: [
+        { v: "fl_low_9_16",     l: "Low Fast 9:16 – 0 credits" },
+        { v: "fl_fast_9_16",    l: "Fast 9:16 – 10 credits" },
+        { v: "fl_quality_9_16", l: "Quality 9:16 – 100 credits" },
+      ]},
+    ],
+  },
+  r2v: {
+    desc: "🎨 Reference → Video: Ảnh tham chiếu phong cách/nhân vật cho video",
+    refLabel: "🎨 Ref",
+    endLabel: null,
+    models: [
+      { group: "🌄 Landscape (16:9)", opts: [
+        { v: "r2v_low_16_9",  l: "Low Fast 16:9 – 0 credits" },
+        { v: "r2v_fast_16_9", l: "Fast 16:9 – 10 credits", sel: true },
+      ]},
+      { group: "📱 Portrait (9:16)", opts: [
+        { v: "r2v_low_9_16",  l: "Low Fast 9:16 – 0 credits" },
+        { v: "r2v_fast_9_16", l: "Fast 9:16 – 10 credits" },
+      ]},
+    ],
+  },
+};
 
 function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
 
@@ -25,6 +97,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Auth ──
 (async function init() {
+  setMode("t2v"); // populate model select on load
   if (authToken && authUser) {
     try { const res = await apiFetch("/auth/me"); if (res.ok) { authUser = await res.json(); localStorage.setItem("bp_user", JSON.stringify(authUser)); showApp(); return; } } catch (e) {}
     clearAuth();
@@ -65,6 +138,72 @@ async function handleAuth(e) {
     showApp();
   } catch (e) { errEl.textContent = "Lỗi kết nối"; errEl.style.display = "block"; }
   return false;
+}
+
+// ── Video Mode ──
+function setMode(mode) {
+  currentMode = mode;
+  const cfg = MODE_CONFIG[mode];
+  Object.keys(MODE_CONFIG).forEach(m => document.getElementById(`modeBtn_${m}`)?.classList.toggle("active", m === mode));
+  document.getElementById("modeDesc").textContent = cfg.desc;
+  const sel = document.getElementById("modelSelect");
+  sel.innerHTML = cfg.models.map(g =>
+    `<optgroup label="${g.group}">${g.opts.map(o => `<option value="${o.v}"${o.sel ? " selected" : ""}>${o.l}</option>`).join("")}</optgroup>`
+  ).join("");
+  updateModelDesc();
+  const hasRef = !!cfg.refLabel;
+  const hasEnd = !!cfg.endLabel;
+  document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
+  document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh Ref";
+  document.getElementById("colEndHead").style.display = hasEnd ? "" : "none";
+  document.getElementById("colEndHead").textContent = cfg.endLabel || "Ảnh End";
+  document.getElementById("btnImportRef").style.display = hasRef ? "" : "none";
+  document.getElementById("btnImportRef").textContent = `📷 Import ${cfg.refLabel || "Ref"} tất cả`;
+  document.getElementById("btnImportEnd").style.display = hasEnd ? "" : "none";
+  if (!currentJobId) populateResultsTable();
+}
+
+function updateModelDesc() {
+  const sel = document.getElementById("modelSelect");
+  const opt = sel.options[sel.selectedIndex];
+  if (opt) document.getElementById("modelDesc").textContent = `Model: ${opt.text}`;
+}
+
+// ── Ref/End Images ──
+function importRefAll() { refImportTargetRow = -1; document.getElementById("refBulkInput").click(); }
+function importEndAll() { endImportTargetRow = -1; document.getElementById("endBulkInput").click(); }
+function importRefForRow(idx) { refImportTargetRow = idx; document.getElementById("refRowInput").click(); }
+function importEndForRow(idx) { endImportTargetRow = idx; document.getElementById("endRowInput").click(); }
+
+function _assignBulk(files, store, total, cb) {
+  let loaded = 0; const imgs = [];
+  files.forEach(file => { const r = new FileReader(); r.onload = e => { imgs.push(e.target.result); if (++loaded === files.length) { for (let i = 0; i < total; i++) store[i] = imgs.length === 1 ? imgs[0] : (imgs[i] || imgs[imgs.length - 1]); cb(); } }; r.readAsDataURL(file); });
+}
+function handleRefBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, rowRefImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
+function handleEndBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, endRowImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
+function handleRefRowImport(input) { const file = input.files[0]; if (!file) return; const r = new FileReader(); r.onload = e => { rowRefImages[refImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file); input.value = ""; }
+function handleEndRowImport(input) { const file = input.files[0]; if (!file) return; const r = new FileReader(); r.onload = e => { endRowImages[endImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file); input.value = ""; }
+function clearRefAll() { rowRefImages = {}; endRowImages = {}; refreshRefCells(); }
+function removeRefImg(idx) { delete rowRefImages[idx]; refreshRefCells(); }
+function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
+
+function refreshRefCells() {
+  const cfg = MODE_CONFIG[currentMode];
+  batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
+    const row = document.getElementById(`resRow${i}`); if (!row) return;
+    if (cfg.refLabel) {
+      const img = rowRefImages[i];
+      row.cells[2].innerHTML = img
+        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i})">✕</span></span>`
+        : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ${cfg.refLabel}</span>`;
+    }
+    if (cfg.endLabel) {
+      const img = endRowImages[i];
+      row.cells[3].innerHTML = img
+        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${i})">✕</span></span>`
+        : `<span class="ref-add-btn" onclick="importEndForRow(${i})">+ ${cfg.endLabel}</span>`;
+    }
+  });
 }
 
 // ── Cookies ──
@@ -163,21 +302,31 @@ async function startGeneration() {
   const prompts = batchFiles.flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
 
+  const model = document.getElementById("modelSelect").value;
   const num_videos = parseInt(document.getElementById("numVideosInput").value) || 1;
-  const t2vModel = document.getElementById("modelSelect").value;
-  const i2vModel = document.getElementById("i2vModelSelect").value;
+
+  // Validate ảnh theo mode
+  if (currentMode === "i2v" || currentMode === "r2v") {
+    const missing = prompts.findIndex((_, i) => !rowRefImages[i]);
+    if (missing >= 0) { sAlert(`Prompt #${missing + 1} chưa có ảnh. Dùng "Import tất cả" để gán nhanh.`); return; }
+  }
+  if (currentMode === "fl") {
+    const missingStart = prompts.findIndex((_, i) => !rowRefImages[i]);
+    const missingEnd   = prompts.findIndex((_, i) => !endRowImages[i]);
+    if (missingStart >= 0) { sAlert(`Prompt #${missingStart + 1} chưa có ảnh Start.`); return; }
+    if (missingEnd >= 0)   { sAlert(`Prompt #${missingEnd + 1} chưa có ảnh End.`); return; }
+  }
 
   document.getElementById("progressCard").style.display = "block";
   document.getElementById("runBtn").disabled = true;
   document.getElementById("stopBtn").disabled = false;
   populateResultsTable();
 
-  // Build per-prompt ref map: {promptIndex: base64}
-  const refMap = {};
-  prompts.forEach((_, i) => { if (rowRefImages[i]) refMap[String(i)] = rowRefImages[i]; });
+  const refMap = {}, endMap = {};
+  prompts.forEach((_, i) => { if (rowRefImages[i]) refMap[String(i)] = rowRefImages[i]; if (endRowImages[i]) endMap[String(i)] = endRowImages[i]; });
 
   try {
-    const body = { prompts, t2v_model: t2vModel, i2v_model: i2vModel, num_videos, ref_images: refMap };
+    const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap };
     const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
@@ -240,22 +389,34 @@ function populateResultsTable() {
   const tbody = document.getElementById("resultsBody");
   const empty = document.getElementById("resultsEmpty");
   const badge = document.getElementById("promptCountBadge");
+  const cfg = MODE_CONFIG[currentMode];
+  const hasRef = !!cfg.refLabel;
+  const hasEnd = !!cfg.endLabel;
+
   if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; return; }
   empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} prompt`;
 
   let html = "", idx = 0;
   batchFiles.forEach(f => {
     const strip = n => n.replace(/\.txt$/i, "");
-    html += `<tr class="file-separator"><td colspan="5">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
+    const cols = 3 + (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
+    html += `<tr class="file-separator"><td colspan="${cols}">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
     f.prompts.forEach(text => {
-      const img = rowRefImages[idx];
-      const refCell = img
-        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx})">✕</span></span>`
-        : `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ảnh</span>`;
+      const refCell = hasRef
+        ? (rowRefImages[idx]
+            ? `<span class="ref-wrap"><img src="${rowRefImages[idx]}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx})">✕</span></span>`
+            : `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ${cfg.refLabel}</span>`)
+        : "";
+      const endCell = hasEnd
+        ? (endRowImages[idx]
+            ? `<span class="ref-wrap"><img src="${endRowImages[idx]}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${idx})">✕</span></span>`
+            : `<span class="ref-add-btn" onclick="importEndForRow(${idx})">+ ${cfg.endLabel}</span>`)
+        : "";
       html += `<tr id="resRow${idx}">
         <td>${idx + 1}</td>
         <td><div class="prompt-cell">${esc(text)}</div></td>
-        <td style="text-align:center">${refCell}</td>
+        ${hasRef ? `<td style="text-align:center">${refCell}</td>` : ""}
+        ${hasEnd ? `<td style="text-align:center">${endCell}</td>` : ""}
         <td class="status-cell">⏳ Chờ</td>
         <td>—</td>
       </tr>`;
