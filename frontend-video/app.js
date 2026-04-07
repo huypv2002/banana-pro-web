@@ -125,7 +125,7 @@ function showApp() {
   document.getElementById("appScreen").style.display = "block";
   document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
   const planEl = document.getElementById("planInfo");
-  if (authUser.role === "admin") { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
+  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
   else if (authUser.plan_active) { const days = Math.ceil((new Date(authUser.plan_expires_at) - new Date()) / 86400000); planEl.textContent = `📦 Còn ${days} ngày`; planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active"); }
   else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   loadCookiesFromDB();

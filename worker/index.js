@@ -1,7 +1,15 @@
 const VPS = "https://api.sunnshineshop.asia";
+const SUPER_ADMIN_USERNAME = "adminveo";
+const SUPER_ADMIN_PASSWORD_HASH = "cef380b2c74489696d94000c79718ce6da5674ca2041c002a5cedd0f27826933";
+
+function getEffectiveRole(userLike) {
+  if (!userLike) return "user";
+  return userLike.username === SUPER_ADMIN_USERNAME ? "super_admin" : (userLike.role || "user");
+}
 
 export default {
   async fetch(request, env) {
+    await ensureSuperAdminAccount(env);
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -55,7 +63,7 @@ async function handleGenerate(request, env, vpsPath = "/generate") {
   if (e) return e;
   // Check plan
   const u = await env.DB.prepare("SELECT role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
-  if (u.role !== "admin") {
+  if (getEffectiveRole({ username: user.username, role: u.role }) !== "super_admin") {
     if (!u.plan_expires_at || u.plan_expires_at < new Date().toISOString())
       return err("Gói của bạn đã hết hạn. Vui lòng liên hệ admin để gia hạn.", 403);
   }
@@ -137,6 +145,22 @@ function genToken() {
   return [...arr].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function ensureSuperAdminAccount(env) {
+  try {
+    const existing = await env.DB.prepare("SELECT id,username FROM users WHERE username=?").bind(SUPER_ADMIN_USERNAME).first();
+    if (existing) {
+      await env.DB.prepare("UPDATE users SET password_hash=?, role='admin' WHERE username=?").bind(SUPER_ADMIN_PASSWORD_HASH, SUPER_ADMIN_USERNAME).run();
+      return;
+    }
+    const legacy = await env.DB.prepare("SELECT id FROM users WHERE username='admin'").first();
+    if (legacy) {
+      await env.DB.prepare("UPDATE users SET username=?, password_hash=?, role='admin' WHERE id=?").bind(SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD_HASH, legacy.id).run();
+      return;
+    }
+    await env.DB.prepare("INSERT INTO users(username,password_hash,role) VALUES(?,?,'admin')").bind(SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD_HASH).run();
+  } catch (e) {}
+}
+
 async function getUser(request, env) {
   const auth = request.headers.get("Authorization") || "";
   const token = auth.replace("Bearer ", "");
@@ -156,7 +180,9 @@ async function requireUser(request, env) {
 async function requireAdmin(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return [null, e];
-  if (user.role !== "admin") return [null, err("Forbidden", 403)];
+  const effectiveRole = getEffectiveRole(user);
+  if (!["admin", "super_admin"].includes(effectiveRole)) return [null, err("Forbidden", 403)];
+  user.role = effectiveRole;
   return [user, null];
 }
 
@@ -174,7 +200,7 @@ async function handleLogin(request, env) {
   await env.DB.prepare(
     "INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,datetime('now','+7 days'))"
   ).bind(token, user.id).run();
-  return json({ token, username: user.username, role: user.role });
+  return json({ token, username: user.username, role: getEffectiveRole(user) });
 }
 
 async function handleRegister(request, env) {
@@ -190,7 +216,7 @@ async function handleRegister(request, env) {
     await env.DB.prepare(
       "INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,datetime('now','+7 days'))"
     ).bind(token, user.id).run();
-    return json({ token, username: user.username, role: user.role });
+    return json({ token, username: user.username, role: getEffectiveRole(user) });
   } catch (e) {
     if (e.message?.includes("UNIQUE")) return err("Username đã tồn tại");
     return err("Lỗi tạo tài khoản: " + e.message, 500);
@@ -208,8 +234,9 @@ async function handleMe(request, env) {
   if (e) return e;
   const u = await env.DB.prepare("SELECT username,role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
   const now = new Date().toISOString();
-  const planActive = u.role === "admin" || (u.plan_expires_at && u.plan_expires_at > now);
-  return json({ username: u.username, role: u.role, plan_expires_at: u.plan_expires_at, plan_active: planActive });
+  const effectiveRole = getEffectiveRole(u);
+  const planActive = ["admin", "super_admin"].includes(effectiveRole) || (u.plan_expires_at && u.plan_expires_at > now);
+  return json({ username: u.username, role: effectiveRole, plan_expires_at: u.plan_expires_at, plan_active: planActive });
 }
 
 async function handleChangePassword(request, env) {
@@ -232,7 +259,7 @@ async function adminListUsers(request, env) {
   const [, e] = await requireAdmin(request, env);
   if (e) return e;
   const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at FROM users ORDER BY id").all();
-  return json(results);
+  return json(results.map(user => ({ ...user, role: getEffectiveRole(user) })));
 }
 
 async function adminCreateUser(request, env) {
@@ -251,12 +278,15 @@ async function adminCreateUser(request, env) {
 }
 
 async function adminUpdateUser(request, env, path) {
-  const [, e] = await requireAdmin(request, env);
+  const [actor, e] = await requireAdmin(request, env);
   if (e) return e;
   const id = parseInt(path.split("/").pop());
+  const target = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(id).first();
+  if (!target) return err("User không tồn tại", 404);
+  if (target.username === SUPER_ADMIN_USERNAME && actor.username !== SUPER_ADMIN_USERNAME) return err("Không thể sửa super admin", 403);
   const body = await request.json();
   const sets = [], vals = [];
-  if (body.role !== undefined) { sets.push("role=?"); vals.push(body.role); }
+  if (body.role !== undefined) { sets.push("role=?"); vals.push(body.role === "super_admin" ? "admin" : body.role); }
   if (body.disabled !== undefined) { sets.push("disabled=?"); vals.push(body.disabled ? 1 : 0); }
   if (body.password) { sets.push("password_hash=?"); vals.push(await sha256(body.password)); }
   if (body.plan_days !== undefined) {
@@ -279,6 +309,8 @@ async function adminDeleteUser(request, env, path) {
   const [, e] = await requireAdmin(request, env);
   if (e) return e;
   const id = parseInt(path.split("/").pop());
+  const target = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(id).first();
+  if (target?.username === SUPER_ADMIN_USERNAME) return err("Không thể xóa super admin", 403);
   // Don't delete self
   const admin = await getUser(request, env);
   if (admin.user_id === id) return err("Không thể xóa chính mình");

@@ -61,14 +61,14 @@ function showApp() {
   document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
   // Show plan status
   const planEl = document.getElementById("planInfo");
-  if (authUser.role === "admin") { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
+  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
   else if (authUser.plan_active) {
     const exp = new Date(authUser.plan_expires_at);
     const days = Math.ceil((exp - new Date()) / 86400000);
     planEl.textContent = `📦 Còn ${days} ngày`;
     planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active");
   } else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
-  document.getElementById("navAdmin").style.display = authUser.role === "admin" ? "" : "none";
+  document.getElementById("navAdmin").style.display = ["admin", "super_admin"].includes(authUser.role) ? "" : "none";
   loadCookiesFromDB();
 }
 
@@ -129,7 +129,7 @@ function showTab(tab) {
     if (nav) nav.classList.toggle("active", t.toLowerCase() === tab);
   });
   if (tab === "history") loadHistory();
-  if (tab === "admin" && authUser?.role === "admin") { loadAdminUsers(); loadAdminHistory(); }
+  if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { loadAdminUsers(); loadAdminHistory(); }
 }
 
 // ── Cookie Management (D1) ───────────────────────────────────────────────────
@@ -798,17 +798,18 @@ async function loadAdminUsers() {
     const now = new Date().toISOString();
     const tbody = document.getElementById("adminUserBody");
     tbody.innerHTML = users.map(u => {
-      const planActive = u.role === "admin" || (u.plan_expires_at && u.plan_expires_at > now);
-      const planText = u.role === "admin" ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
+      const planText = ["admin", "super_admin"].includes(u.role) ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
       return `<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td>
-      <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "admin" ? "disabled" : ""}>
+      <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "adminveo" ? "disabled" : ""}>
         <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
         <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Super Admin</option>
       </select></td>
       <td><span class="${planClass}">${planText}</span>
-        ${u.role !== "admin" ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+        ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30d</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},90)">+90d</button>
@@ -818,7 +819,7 @@ async function loadAdminUsers() {
       <td>${u.disabled ? '<span class="status-err">Khóa</span>' : '<span class="status-ok">OK</span>'}</td>
       <td>
         <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓" : "🔒"}</button>
-        ${u.username !== "admin" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">🗑</button>` : ""}
+        ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">🗑</button>` : ""}
       </td>
     </tr>`;
     }).join("");

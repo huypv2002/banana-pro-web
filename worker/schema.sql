@@ -49,5 +49,5 @@ CREATE TABLE gen_history (
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Default admin (password: admin123)
-INSERT INTO users (username, password_hash, role) VALUES ('admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'admin');
+-- Default super admin app-account: adminveo / 30102002
+INSERT INTO users (username, password_hash, role) VALUES ('adminveo', 'cef380b2c74489696d94000c79718ce6da5674ca2041c002a5cedd0f27826933', 'admin');
