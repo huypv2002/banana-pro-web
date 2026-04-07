@@ -6,6 +6,7 @@ function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmBut
 function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 function sError(text) { return Swal.fire({ text, icon: "error", confirmButtonColor: "#16a34a" }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
+function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
 
 // ── Auth State ────────────────────────────────────────────────────────────────
 let authToken = localStorage.getItem("bp_token") || "";
@@ -58,10 +59,10 @@ function showLogin() {
 function showApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "block";
-  document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
+  document.getElementById("userInfo").textContent = `${authUser.username} (${roleLabel(authUser.role)})`;
   // Show plan status
   const planEl = document.getElementById("planInfo");
-  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
+  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "Không giới hạn"; planEl.className = "plan-badge plan-active"; }
   else if (authUser.plan_active) {
     const exp = new Date(authUser.plan_expires_at);
     const days = Math.ceil((exp - new Date()) / 86400000);
@@ -548,7 +549,7 @@ function getBatchName() {
   return names.length ? names.join(", ") : "Untitled";
 }
 
-function togglePause() { paused = !paused; document.getElementById("pauseBtn").textContent = paused ? "▶ TIẾP TỤC" : "⏸ TẠM DỪNG"; }
+function togglePause() { paused = !paused; document.getElementById("pauseBtn").textContent = paused ? "Tiếp tục" : "Tạm dừng"; }
 
 async function stopGeneration() {
   if (!currentJobId) return;
@@ -800,14 +801,14 @@ async function loadAdminUsers() {
     const tbody = document.getElementById("adminUserBody");
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
-      const planText = ["admin", "super_admin"].includes(u.role) ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
       return `<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td>
       <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "adminveo" ? "disabled" : ""}>
-        <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
-        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
-        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Super Admin</option>
+        <option value="user" ${u.role === "user" ? "selected" : ""}>Người dùng</option>
+        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Quản trị viên</option>
+        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Chủ hệ thống</option>
       </select></td>
       <td><span class="${planClass}">${planText}</span>
         ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
@@ -846,9 +847,9 @@ function updateAdminDashboard(users) {
 
   const summary = document.getElementById("adminSummaryList");
   const items = [
-    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm admin và super admin đang có quyền điều hành." },
-    { label: "Gói sắp hết hạn", value: `${expiringSoon} user`, note: "Ưu tiên gia hạn để tránh gián đoạn khi user gen ảnh." },
-    { label: "Tài khoản bị khóa", value: `${lockedUsers} user`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
+    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm quản trị viên và chủ hệ thống đang có quyền điều hành." },
+    { label: "Gói sắp hết hạn", value: `${expiringSoon} tài khoản`, note: "Ưu tiên gia hạn để tránh gián đoạn khi người dùng tạo ảnh." },
+    { label: "Tài khoản bị khóa", value: `${lockedUsers} tài khoản`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
   ];
   summary.innerHTML = items.map(item => `<div class="admin-summary-item"><strong>${item.label}</strong><span>${item.value}<br>${item.note}</span></div>`).join("");
 }
@@ -934,7 +935,7 @@ function populateResultsTable() {
   empty.style.display = "none";
   badge.style.display = "";
   const totalImages = allPrompts.length * variants;
-  badge.textContent = `${totalImages} ảnh (${allPrompts.length} prompt × ${variants})`;
+  badge.textContent = `${totalImages} ảnh (${allPrompts.length} dòng × ${variants})`;
 
   let html = "", globalIdx = 0;
   batchFiles.forEach(f => {

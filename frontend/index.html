@@ -40,16 +40,19 @@
     <span class="app-name">Banana Pro</span>
   </div>
   <nav class="header-nav">
-    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">🎨 Tạo ảnh</button>
-    <button class="nav-btn" onclick="showTab('history')" id="navHistory">📜 Lịch sử</button>
-    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">👑 Admin</button>
+    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">Tạo ảnh</button>
+    <button class="nav-btn" onclick="showTab('history')" id="navHistory">Lịch sử</button>
+    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">Quản trị</button>
   </nav>
   <div class="header-right">
-    <a class="btn btn-outline" href="https://banana-pro-video.liveyt.pro/">🎬 Video</a>
+    <div class="app-switcher">
+      <a class="app-switch-link active" href="https://banana-pro-web.pages.dev/">Ảnh</a>
+      <a class="app-switch-link" href="https://banana-pro-video.liveyt.pro/">Video</a>
+    </div>
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
-    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
-    <button class="btn btn-outline" onclick="handleLogout()">🚪 Đăng xuất</button>
+    <button class="btn btn-outline" onclick="openCookieModal()">Kho cookie</button>
+    <button class="btn btn-outline" onclick="handleLogout()">Đăng xuất</button>
   </div>
 </header>
 
@@ -59,9 +62,9 @@
   <!-- LEFT PANEL -->
   <div class="left-panel" id="leftPanel">
     <div class="card">
-      <div class="card-title">⚙️ Cấu hình</div>
+      <div class="card-title">Cấu hình</div>
       <div class="form-grid">
-        <label>Model</label>
+        <label>Mô hình</label>
         <select id="modelSelect">
           <option value="NARWHAL">Banana Pro 2</option>
           <option value="GEM_PIX_2">Banana Pro</option>
@@ -90,7 +93,7 @@
     </div>
 
     <div class="card" id="promptSourceCard">
-      <div class="card-title">📄 Nguồn prompt (.txt)</div>
+      <div class="card-title">Nguồn nội dung (.txt)</div>
       <div class="field-row">
         <label>File .txt</label>
         <div class="input-btn-row">
@@ -108,10 +111,10 @@
         </div>
       </div>
       <div style="text-align:right;margin-top:6px">
-        <button class="btn btn-ghost" onclick="clearSources()">🧹 Xóa danh sách</button>
+        <button class="btn btn-ghost" onclick="clearSources()">Xóa danh sách</button>
       </div>
       <table class="batch-table" id="batchTable">
-        <thead><tr><th>STT</th><th>Tên File</th><th>Số Prompt</th><th>Trạng thái</th></tr></thead>
+        <thead><tr><th>STT</th><th>Tên File</th><th>Số dòng</th><th>Trạng thái</th></tr></thead>
         <tbody id="batchTableBody"></tbody>
       </table>
     </div>
@@ -119,9 +122,9 @@
     <!-- Ref image UI moved to results table toolbar -->
 
     <div class="action-buttons">
-      <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ CHẠY NGAY</button>
-      <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>⏸ TẠM DỪNG</button>
-      <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
+      <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo ảnh</button>
+      <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>Tạm dừng</button>
+      <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
     </div>
 
     <div class="card" id="progressCard" style="display:none">
@@ -140,10 +143,10 @@
     <div class="results-header">
       <h2>Kết quả <span id="statusBadge"></span> <span id="promptCountBadge" class="badge badge-pending" style="display:none"></span></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost" onclick="importRefAll()">📷 Import ảnh tất cả</button>
-        <button class="btn btn-ghost" onclick="clearRefAll()">🗑 Xóa ảnh tất cả</button>
-        <button class="btn btn-ghost" onclick="downloadAll()">⬇ Tải tất cả (ZIP)</button>
-        <button class="btn btn-ghost" onclick="clearResults()">🗑 Xóa</button>
+        <button class="btn btn-ghost" onclick="importRefAll()">Thêm ảnh tham chiếu</button>
+        <button class="btn btn-ghost" onclick="clearRefAll()">Xóa ảnh tham chiếu</button>
+        <button class="btn btn-ghost" onclick="downloadAll()">Tải tất cả</button>
+        <button class="btn btn-ghost" onclick="clearResults()">Xóa kết quả</button>
       </div>
       <input type="file" id="refBulkInput" multiple accept="image/*" style="display:none" onchange="handleRefBulkImport(this)"/>
       <input type="file" id="refRowInput" multiple accept="image/*" style="display:none" onchange="handleRefRowImport(this)"/>
@@ -153,8 +156,8 @@
         <thead>
           <tr>
             <th style="width:5%">#</th>
-            <th class="col-prompt" style="width:35%">Prompt</th>
-            <th style="width:35%">Ảnh Ref</th>
+            <th class="col-prompt" style="width:35%">Nội dung</th>
+            <th style="width:35%">Ảnh tham chiếu</th>
             <th style="width:10%">Trạng thái</th>
             <th>Ảnh kết quả</th>
           </tr>
@@ -175,15 +178,15 @@
   <div class="history-container">
     <div class="history-header">
       <div style="display:flex;align-items:center;gap:8px">
-        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">← Quay lại</button>
-        <h2 id="historyTitle">📜 Lịch sử tạo ảnh</h2>
+        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">Quay lại</button>
+        <h2 id="historyTitle">Lịch sử tạo ảnh</h2>
       </div>
       <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 14px;font-size:0.78rem;color:#92400e;display:flex;align-items:center;gap:6px">⚠️ Lịch sử chỉ lưu trong <b>24 giờ</b>. Hãy tải ảnh về trước khi hết hạn!</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-blue" onclick="loadHistory()">🔄 Làm mới</button>
-        <button class="btn btn-red" onclick="deleteHistoryFailed()">🗑 Xóa lỗi</button>
-        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">⬇ Tải tất cả (ZIP)</button>
-        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">⬇ Tải đã chọn</button>
+        <button class="btn btn-blue" onclick="loadHistory()">Làm mới</button>
+        <button class="btn btn-red" onclick="deleteHistoryFailed()">Xóa lỗi</button>
+        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">Tải tất cả</button>
+        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">Tải đã chọn</button>
         <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="historySelectAll" onchange="historyToggleAll(this.checked)"/> Chọn tất cả</label>
       </div>
     </div>
@@ -201,103 +204,99 @@
 <!-- ═══ TAB: ADMIN ═══ -->
 <div id="tabAdmin" class="tab-content" style="display:none">
   <div class="admin-container">
-    <section class="admin-hero">
-      <div class="admin-hero-copy">
-        <span class="admin-kicker">Super Admin Workspace</span>
-        <h2>Điều hành tài khoản, gói và toàn bộ hoạt động từ một dashboard</h2>
-        <p>Giữ nguyên ngôn ngữ Banana Pro nhưng gom quản trị người dùng, trạng thái gói và lịch sử vận hành vào một mặt phẳng làm việc rõ ràng hơn.</p>
-      </div>
-      <div class="admin-hero-panel">
-        <div class="admin-hero-badge">👑 Super Admin</div>
-        <div class="admin-hero-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị...</div>
-      </div>
-    </section>
-
-    <section class="admin-stats" id="adminStats">
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Tổng user</span>
-        <strong class="admin-stat-value" id="adminStatUsers">0</strong>
-        <span class="admin-stat-note">Tài khoản hiện có trong hệ thống</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Gói hoạt động</span>
-        <strong class="admin-stat-value" id="adminStatPlans">0</strong>
-        <span class="admin-stat-note">User còn hạn hoặc có quyền vô hạn</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Tài khoản bị khóa</span>
-        <strong class="admin-stat-value" id="adminStatLocked">0</strong>
-        <span class="admin-stat-note">Cần rà soát hoặc mở khóa thủ công</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Lượt gen gần đây</span>
-        <strong class="admin-stat-value" id="adminStatHistory">0</strong>
-        <span class="admin-stat-note">Mẫu gần nhất đang hiển thị bên dưới</span>
-      </article>
-    </section>
-
-    <section class="admin-layout">
-      <div class="admin-main">
-        <div class="admin-section">
-          <div class="admin-section-head">
-            <div>
-              <h3>Người dùng & gói</h3>
-              <p>Theo dõi role, trạng thái và thời hạn gói trên cùng một bảng điều hành.</p>
-            </div>
-            <div class="admin-inline-note">User `adminveo` được khóa chỉnh sửa vì là super admin gốc.</div>
-          </div>
-          <div class="admin-table-wrap">
-            <table class="cookie-table admin-user-table" id="adminUserTable">
-              <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Gói</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
-              <tbody id="adminUserBody"></tbody>
-            </table>
-          </div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="admin-sidebar-head">
+          <div class="admin-sidebar-title">Bảng điều hành</div>
+          <div class="admin-sidebar-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị...</div>
         </div>
-      </div>
-      <aside class="admin-side">
-        <div class="admin-section admin-section-tight">
-          <div class="admin-section-head">
-            <div>
-              <h3>Tạo tài khoản mới</h3>
-              <p>Thêm nhanh user mới và gán role ngay trong dashboard.</p>
-            </div>
-          </div>
-          <div class="admin-form">
-            <input type="text" id="adminNewUser" placeholder="Username"/>
-            <input type="password" id="adminNewPass" placeholder="Password"/>
-            <select id="adminNewRole">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">➕ Tạo tài khoản</button>
-          </div>
+        <div class="admin-sidebar-nav">
+          <button class="admin-side-link active">Tổng quan</button>
+          <button class="admin-side-link">Người dùng</button>
+          <button class="admin-side-link">Gói dịch vụ</button>
+          <button class="admin-side-link">Lịch sử hệ thống</button>
         </div>
-
-        <div class="admin-section admin-section-tight">
-          <div class="admin-section-head">
-            <div>
-              <h3>Tóm tắt vận hành</h3>
-              <p>Nhìn nhanh để biết hệ thống đang nghiêng về tăng trưởng, khóa tài khoản hay cần gia hạn.</p>
-            </div>
-          </div>
-          <div class="admin-summary-list" id="adminSummaryList">
-            <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
-          </div>
+        <div class="admin-summary-list" id="adminSummaryList">
+          <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
         </div>
       </aside>
-    </section>
 
-    <section class="admin-section admin-history-section">
-      <div class="admin-section-head">
-        <div>
-          <h3>Lịch sử toàn hệ thống</h3>
-          <p>Hiển thị các lượt gen gần đây để kiểm tra hoạt động user và xu hướng sử dụng.</p>
-        </div>
+      <div class="admin-content">
+        <section class="admin-stats" id="adminStats">
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Tổng tài khoản</span>
+            <strong class="admin-stat-value" id="adminStatUsers">0</strong>
+            <span class="admin-stat-note">Toàn bộ tài khoản đang có trong hệ thống</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Gói đang hoạt động</span>
+            <strong class="admin-stat-value" id="adminStatPlans">0</strong>
+            <span class="admin-stat-note">Bao gồm tài khoản còn hạn và không giới hạn</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Tài khoản bị khóa</span>
+            <strong class="admin-stat-value" id="adminStatLocked">0</strong>
+            <span class="admin-stat-note">Cần kiểm tra hoặc mở lại khi cần thiết</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Lượt tạo gần đây</span>
+            <strong class="admin-stat-value" id="adminStatHistory">0</strong>
+            <span class="admin-stat-note">Số bản ghi đang hiển thị trong khu lịch sử</span>
+          </article>
+        </section>
+
+        <section class="admin-layout">
+          <div class="admin-main">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <div>
+                  <h3>Người dùng và gói dịch vụ</h3>
+                  <p>Theo dõi vai trò, trạng thái tài khoản và thời hạn gói trong một bảng duy nhất.</p>
+                </div>
+                <div class="admin-inline-note">Tài khoản `adminveo` được khóa chỉnh sửa.</div>
+              </div>
+              <div class="admin-table-wrap">
+                <table class="cookie-table admin-user-table" id="adminUserTable">
+                  <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+                  <tbody id="adminUserBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <aside class="admin-side">
+            <div class="admin-section admin-section-tight">
+              <div class="admin-section-head">
+                <div>
+                  <h3>Tạo tài khoản mới</h3>
+                  <p>Thêm nhanh tài khoản mới và gán vai trò ngay trong trang quản trị.</p>
+                </div>
+              </div>
+              <div class="admin-form">
+                <input type="text" id="adminNewUser" placeholder="Tên đăng nhập"/>
+                <input type="password" id="adminNewPass" placeholder="Mật khẩu"/>
+                <select id="adminNewRole">
+                  <option value="user">Người dùng</option>
+                  <option value="admin">Quản trị viên</option>
+                </select>
+                <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="admin-section admin-history-section">
+          <div class="admin-section-head">
+            <div>
+              <h3>Lịch sử toàn hệ thống</h3>
+              <p>Theo dõi các lượt tạo gần đây để kiểm tra chất lượng vận hành và tần suất sử dụng.</p>
+            </div>
+          </div>
+          <div id="adminHistoryGrid" class="results-grid admin-history-grid">
+            <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+          </div>
+        </section>
       </div>
-      <div id="adminHistoryGrid" class="results-grid admin-history-grid">
-        <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
-      </div>
-    </section>
+    </div>
   </div>
 </div>
 
@@ -312,8 +311,8 @@
     </div>
     <div class="modal-body">
       <div class="cookie-actions">
-        <button class="btn btn-green" onclick="importCookieTxt()">📝 Import TXT</button>
-        <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
+        <button class="btn btn-green" onclick="importCookieTxt()">Nhập từ TXT</button>
+        <button class="btn btn-red" onclick="clearAllCookies()">Xóa tất cả</button>
         <input type="file" id="cookieTxtImport" accept=".txt" style="display:none" onchange="loadCookieTxt(this)"/>
       </div>
       <div class="cookie-help">
@@ -327,8 +326,8 @@
         <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-green" onclick="addCookie()">➕ Thêm</button>
-        <button class="btn btn-blue" onclick="testCookie()">🔍 Test cookie</button>
+        <button class="btn btn-green" onclick="addCookie()">Thêm</button>
+        <button class="btn btn-blue" onclick="testCookie()">Kiểm tra cookie</button>
       </div>
       <div id="cookieTestResult" style="margin-top:8px;font-size:0.82rem"></div>
       <table class="cookie-table" id="cookieTable" style="margin-top:12px">
@@ -337,7 +336,7 @@
       </table>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="closeCookieModal()">💾 Đóng</button>
+      <button class="btn btn-primary" onclick="closeCookieModal()">Đóng</button>
     </div>
   </div>
 </div>

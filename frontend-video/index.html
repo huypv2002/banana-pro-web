@@ -21,8 +21,8 @@
       <button class="login-tab" onclick="switchAuthTab('register')">Đăng ký</button>
     </div>
     <form onsubmit="return handleAuth(event)">
-      <input type="text" id="authUsername" placeholder="Username" required autocomplete="username"/>
-      <input type="password" id="authPassword" placeholder="Password" required autocomplete="current-password"/>
+      <input type="text" id="authUsername" placeholder="Tên đăng nhập" required autocomplete="username"/>
+      <input type="password" id="authPassword" placeholder="Mật khẩu" required autocomplete="current-password"/>
       <button type="submit" class="login-btn" id="authSubmitBtn">Đăng nhập</button>
     </form>
     <div id="authError" class="auth-error" style="display:none"></div>
@@ -37,16 +37,19 @@
     <span class="app-name">Banana Pro Video</span>
   </div>
   <nav class="header-nav">
-    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">🎬 Tạo video</button>
-    <button class="nav-btn" onclick="showTab('history')" id="navHistory">📜 Lịch sử</button>
-    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">👑 Admin</button>
+    <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">Tạo video</button>
+    <button class="nav-btn" onclick="showTab('history')" id="navHistory">Lịch sử</button>
+    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">Quản trị</button>
   </nav>
   <div class="header-right">
-    <a class="btn btn-outline" href="https://banana-pro-web.pages.dev/">🍌 Ảnh</a>
+    <div class="app-switcher">
+      <a class="app-switch-link" href="https://banana-pro-web.pages.dev/">Ảnh</a>
+      <a class="app-switch-link active" href="https://banana-pro-video.liveyt.pro/">Video</a>
+    </div>
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
-    <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
-    <button class="btn btn-outline" onclick="logout()">🚪 Đăng xuất</button>
+    <button class="btn btn-outline" onclick="openCookieModal()">Kho cookie</button>
+    <button class="btn btn-outline" onclick="logout()">Đăng xuất</button>
   </div>
 </header>
 
@@ -55,27 +58,27 @@
 <!-- LEFT PANEL -->
 <div class="left-panel">
   <div class="card">
-    <div class="card-title">⚙️ Cài đặt</div>
+    <div class="card-title">Cài đặt</div>
 
     <!-- Mode switcher -->
     <div class="mode-switcher">
       <button class="mode-btn active" id="modeBtn_t2v" onclick="setMode('t2v')" title="Text to Video">
-        <span class="mode-icon">📝</span><span class="mode-label">T2V</span>
+        <span class="mode-label">T2V</span>
       </button>
       <button class="mode-btn" id="modeBtn_i2v" onclick="setMode('i2v')" title="Image to Video (Start frame)">
-        <span class="mode-icon">🖼</span><span class="mode-label">I2V</span>
+        <span class="mode-label">I2V</span>
       </button>
       <button class="mode-btn" id="modeBtn_fl" onclick="setMode('fl')" title="First + Last frame to Video">
-        <span class="mode-icon">🎞</span><span class="mode-label">FL</span>
+        <span class="mode-label">FL</span>
       </button>
       <button class="mode-btn" id="modeBtn_r2v" onclick="setMode('r2v')" title="Reference image to Video">
-        <span class="mode-icon">🎨</span><span class="mode-label">R2V</span>
+        <span class="mode-label">R2V</span>
       </button>
     </div>
-    <div id="modeDesc" class="mode-desc">📝 Text → Video: Tạo video từ prompt văn bản</div>
+    <div id="modeDesc" class="mode-desc">Văn bản sang video: tạo video từ nội dung mô tả</div>
 
     <div class="form-grid" style="margin-top:10px">
-      <label>Model</label>
+      <label>Mô hình</label>
       <select id="modelSelect" onchange="updateModelDesc()"></select>
       <label>Số video / prompt</label>
       <input type="number" id="numVideosInput" value="1" min="1" max="4"/>
@@ -86,7 +89,7 @@
   </div>
 
   <div class="card">
-    <div class="card-title">📄 Nguồn prompt (.txt)</div>
+    <div class="card-title">Nguồn nội dung (.txt)</div>
     <div class="field-row">
       <label>File .txt</label>
       <div class="input-btn-row">
@@ -104,17 +107,17 @@
       </div>
     </div>
     <div style="text-align:right;margin-top:6px">
-      <button class="btn btn-ghost" onclick="clearSources()">🧹 Xóa danh sách</button>
+      <button class="btn btn-ghost" onclick="clearSources()">Xóa danh sách</button>
     </div>
     <table class="batch-table" id="batchTable" style="margin-top:8px">
-      <thead><tr><th>STT</th><th>File</th><th>Prompts</th><th>Trạng thái</th></tr></thead>
+      <thead><tr><th>STT</th><th>File</th><th>Số dòng</th><th>Trạng thái</th></tr></thead>
       <tbody id="batchTableBody"><tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr></tbody>
     </table>
   </div>
 
   <div class="action-buttons" style="grid-template-columns:1fr 1fr">
-    <button class="btn btn-run" id="runBtn" onclick="startGeneration()">▶ TẠO VIDEO</button>
-    <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>⏹ DỪNG</button>
+    <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo video</button>
+    <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
   </div>
 
   <div class="card" id="progressCard" style="display:none">
@@ -130,11 +133,11 @@
 <!-- RIGHT PANEL -->
 <div class="right-panel">
   <div class="results-header">
-    <h2>🎬 Kết quả <span id="statusBadge"></span> <span id="promptCountBadge" class="badge badge-pending" style="display:none"></span></h2>
+    <h2>Kết quả <span id="statusBadge"></span> <span id="promptCountBadge" class="badge badge-pending" style="display:none"></span></h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-ghost" id="btnImportRef" onclick="importRefAll()">📷 Import ảnh tất cả</button>
-      <button class="btn btn-ghost" id="btnImportEnd" onclick="importEndAll()" style="display:none">🏁 Import End tất cả</button>
-      <button class="btn btn-ghost" onclick="clearRefAll()">🗑 Xóa ảnh tất cả</button>
+      <button class="btn btn-ghost" id="btnImportRef" onclick="importRefAll()">Thêm ảnh đầu vào</button>
+      <button class="btn btn-ghost" id="btnImportEnd" onclick="importEndAll()" style="display:none">Thêm ảnh kết thúc</button>
+      <button class="btn btn-ghost" onclick="clearRefAll()">Xóa ảnh</button>
     </div>
     <input type="file" id="refBulkInput" multiple accept="image/*" style="display:none" onchange="handleRefBulkImport(this)"/>
     <input type="file" id="refRowInput" accept="image/*" style="display:none" onchange="handleRefRowImport(this)"/>
@@ -146,9 +149,9 @@
       <thead>
         <tr>
           <th style="width:5%">#</th>
-          <th class="col-prompt">Prompt</th>
-          <th id="colRefHead">Ảnh Ref</th>
-          <th id="colEndHead" style="display:none">Ảnh End</th>
+          <th class="col-prompt">Nội dung</th>
+          <th id="colRefHead">Ảnh đầu vào</th>
+          <th id="colEndHead" style="display:none">Ảnh kết thúc</th>
           <th style="width:10%">Trạng thái</th>
           <th>Video</th>
         </tr>
@@ -157,7 +160,7 @@
     </table>
     <div id="resultsEmpty" class="empty-state">
       <div class="empty-icon">🎬</div>
-      <div>Chọn file prompt và bấm TẠO VIDEO</div>
+      <div>Chọn file nội dung rồi bấm Tạo video</div>
     </div>
   </div>
 </div>
@@ -169,14 +172,14 @@
   <div class="history-container">
     <div class="history-header">
       <div style="display:flex;align-items:center;gap:8px">
-        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">← Quay lại</button>
-        <h2 id="historyTitle">📜 Lịch sử tạo video</h2>
+        <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">Quay lại</button>
+        <h2 id="historyTitle">Lịch sử tạo video</h2>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-blue" onclick="loadHistory()">🔄 Làm mới</button>
-        <button class="btn btn-red" onclick="deleteHistoryFailed()">🗑 Xóa lỗi</button>
-        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">⬇ Tải tất cả (ZIP)</button>
-        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">⬇ Tải đã chọn</button>
+        <button class="btn btn-blue" onclick="loadHistory()">Làm mới</button>
+        <button class="btn btn-red" onclick="deleteHistoryFailed()">Xóa lỗi</button>
+        <button class="btn btn-green" id="histDlAll" onclick="historyDownloadAll()">Tải tất cả</button>
+        <button class="btn btn-green" id="histDlSel" onclick="historyDownloadSelected()">Tải đã chọn</button>
         <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="historySelectAll" onchange="historyToggleAll(this.checked)"/> Chọn tất cả</label>
       </div>
     </div>
@@ -193,103 +196,99 @@
 
 <div id="tabAdmin" class="tab-content" style="display:none">
   <div class="admin-container">
-    <section class="admin-hero">
-      <div class="admin-hero-copy">
-        <span class="admin-kicker">Super Admin Workspace</span>
-        <h2>Điều hành user, gói và lịch sử video từ một dashboard tập trung</h2>
-        <p>Giao diện quản trị của Banana Pro Video được đồng bộ cùng tinh thần với trang image, nhưng ưu tiên thêm góc nhìn theo batch, file và luồng gen video gần đây.</p>
-      </div>
-      <div class="admin-hero-panel">
-        <div class="admin-hero-badge">👑 Super Admin</div>
-        <div class="admin-hero-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị video...</div>
-      </div>
-    </section>
-
-    <section class="admin-stats" id="adminStats">
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Tổng user</span>
-        <strong class="admin-stat-value" id="adminStatUsers">0</strong>
-        <span class="admin-stat-note">Tài khoản hiện có trong hệ thống</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Gói hoạt động</span>
-        <strong class="admin-stat-value" id="adminStatPlans">0</strong>
-        <span class="admin-stat-note">User còn hạn hoặc có quyền vô hạn</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Tài khoản bị khóa</span>
-        <strong class="admin-stat-value" id="adminStatLocked">0</strong>
-        <span class="admin-stat-note">Cần rà soát hoặc mở khóa thủ công</span>
-      </article>
-      <article class="admin-stat-card">
-        <span class="admin-stat-label">Lượt gen gần đây</span>
-        <strong class="admin-stat-value" id="adminStatHistory">0</strong>
-        <span class="admin-stat-note">Mẫu video gần nhất đang hiển thị bên dưới</span>
-      </article>
-    </section>
-
-    <section class="admin-layout">
-      <div class="admin-main">
-        <div class="admin-section">
-          <div class="admin-section-head">
-            <div>
-              <h3>Người dùng & gói</h3>
-              <p>Quản lý role, khóa tài khoản và gia hạn gói ngay trên cùng một bảng điều hành.</p>
-            </div>
-            <div class="admin-inline-note">User `adminveo` được khóa chỉnh sửa vì là super admin gốc.</div>
-          </div>
-          <div class="admin-table-wrap">
-            <table class="cookie-table admin-user-table" id="adminUserTable">
-              <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Gói</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
-              <tbody id="adminUserBody"></tbody>
-            </table>
-          </div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="admin-sidebar-head">
+          <div class="admin-sidebar-title">Bảng điều hành</div>
+          <div class="admin-sidebar-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị video...</div>
         </div>
-      </div>
-      <aside class="admin-side">
-        <div class="admin-section admin-section-tight">
-          <div class="admin-section-head">
-            <div>
-              <h3>Tạo tài khoản mới</h3>
-              <p>Thêm nhanh user mới và gán role ngay trong dashboard.</p>
-            </div>
-          </div>
-          <div class="admin-form">
-            <input type="text" id="adminNewUser" placeholder="Username"/>
-            <input type="password" id="adminNewPass" placeholder="Password"/>
-            <select id="adminNewRole">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">➕ Tạo tài khoản</button>
-          </div>
+        <div class="admin-sidebar-nav">
+          <button class="admin-side-link active">Tổng quan</button>
+          <button class="admin-side-link">Người dùng</button>
+          <button class="admin-side-link">Gói dịch vụ</button>
+          <button class="admin-side-link">Lịch sử hệ thống</button>
         </div>
-
-        <div class="admin-section admin-section-tight">
-          <div class="admin-section-head">
-            <div>
-              <h3>Tóm tắt vận hành</h3>
-              <p>Nhìn nhanh để biết hệ thống đang nghiêng về tăng trưởng, khóa tài khoản hay cần gia hạn.</p>
-            </div>
-          </div>
-          <div class="admin-summary-list" id="adminSummaryList">
-            <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
-          </div>
+        <div class="admin-summary-list" id="adminSummaryList">
+          <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
         </div>
       </aside>
-    </section>
 
-    <section class="admin-section admin-history-section">
-      <div class="admin-section-head">
-        <div>
-          <h3>Lịch sử toàn hệ thống</h3>
-          <p>Hiển thị batch gen gần đây của cả image và video để super admin theo dõi hoạt động user thuận tiện hơn.</p>
-        </div>
+      <div class="admin-content">
+        <section class="admin-stats" id="adminStats">
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Tổng tài khoản</span>
+            <strong class="admin-stat-value" id="adminStatUsers">0</strong>
+            <span class="admin-stat-note">Toàn bộ tài khoản đang có trong hệ thống</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Gói đang hoạt động</span>
+            <strong class="admin-stat-value" id="adminStatPlans">0</strong>
+            <span class="admin-stat-note">Bao gồm tài khoản còn hạn và không giới hạn</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Tài khoản bị khóa</span>
+            <strong class="admin-stat-value" id="adminStatLocked">0</strong>
+            <span class="admin-stat-note">Cần kiểm tra hoặc mở lại khi cần thiết</span>
+          </article>
+          <article class="admin-stat-card">
+            <span class="admin-stat-label">Lượt tạo gần đây</span>
+            <strong class="admin-stat-value" id="adminStatHistory">0</strong>
+            <span class="admin-stat-note">Số bản ghi đang hiển thị trong khu lịch sử</span>
+          </article>
+        </section>
+
+        <section class="admin-layout">
+          <div class="admin-main">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <div>
+                  <h3>Người dùng và gói dịch vụ</h3>
+                  <p>Theo dõi vai trò, trạng thái tài khoản và thời hạn gói trong một bảng duy nhất.</p>
+                </div>
+                <div class="admin-inline-note">Tài khoản `adminveo` được khóa chỉnh sửa.</div>
+              </div>
+              <div class="admin-table-wrap">
+                <table class="cookie-table admin-user-table" id="adminUserTable">
+                  <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+                  <tbody id="adminUserBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <aside class="admin-side">
+            <div class="admin-section admin-section-tight">
+              <div class="admin-section-head">
+                <div>
+                  <h3>Tạo tài khoản mới</h3>
+                  <p>Thêm nhanh tài khoản mới và gán vai trò ngay trong trang quản trị.</p>
+                </div>
+              </div>
+              <div class="admin-form">
+                <input type="text" id="adminNewUser" placeholder="Tên đăng nhập"/>
+                <input type="password" id="adminNewPass" placeholder="Mật khẩu"/>
+                <select id="adminNewRole">
+                  <option value="user">Người dùng</option>
+                  <option value="admin">Quản trị viên</option>
+                </select>
+                <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="admin-section admin-history-section">
+          <div class="admin-section-head">
+            <div>
+              <h3>Lịch sử toàn hệ thống</h3>
+              <p>Theo dõi các lượt tạo gần đây của cả hai hệ để kiểm tra hoạt động và chất lượng vận hành.</p>
+            </div>
+          </div>
+          <div id="adminHistoryGrid" class="results-grid admin-history-grid">
+            <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+          </div>
+        </section>
       </div>
-      <div id="adminHistoryGrid" class="results-grid admin-history-grid">
-        <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
-      </div>
-    </section>
+    </div>
   </div>
 </div>
 
@@ -297,11 +296,11 @@
 <div class="modal-overlay" id="cookieModal" style="display:none" onclick="if(event.target===this)closeCookieModal()">
   <div class="modal">
     <div class="modal-header">
-      <h3>🍪 Quản lý Cookie</h3>
+      <h3>Quản lý cookie</h3>
       <button class="modal-close" onclick="closeCookieModal()">✕</button>
     </div>
     <div class="modal-body">
-      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#92400e">⚠️ Cookie chỉ có hạn <b>10–24 giờ</b>. Nhớ kiểm tra và lấy cookie mới trước khi tạo video!</div>
+      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#92400e">Cookie chỉ có hạn <b>10–24 giờ</b>. Hãy kiểm tra và thay cookie mới trước khi tạo video nếu cần.</div>
       <div class="cookie-help">
         <strong>Cách lấy cookie:</strong> Cài
         <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank">Cookie Editor</a>
@@ -312,8 +311,8 @@
         <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-green" onclick="addCookie()">➕ Thêm</button>
-        <button class="btn btn-red" onclick="clearAllCookies()">🗑 Xóa tất cả</button>
+        <button class="btn btn-green" onclick="addCookie()">Thêm</button>
+        <button class="btn btn-red" onclick="clearAllCookies()">Xóa tất cả</button>
       </div>
       <table class="cookie-table" id="cookieTable" style="margin-top:12px">
         <thead><tr><th>#</th><th>Cookie (hash)</th><th>Email</th><th>Trạng thái</th><th></th></tr></thead>
@@ -321,7 +320,7 @@
       </table>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="closeCookieModal()">💾 Đóng</button>
+      <button class="btn btn-primary" onclick="closeCookieModal()">Đóng</button>
     </div>
   </div>
 </div>

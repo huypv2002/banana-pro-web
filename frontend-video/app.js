@@ -4,6 +4,7 @@ const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: 
 function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmButtonColor: "#16a34a" }); }
 function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
+function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
 
 let authToken = localStorage.getItem("bp_token") || "";
 let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
@@ -31,7 +32,7 @@ let endImportTargetRow = -1;
 
 const MODE_CONFIG = {
   t2v: {
-    desc: "📝 Text → Video: Tạo video từ prompt văn bản",
+    desc: "Văn bản sang video: tạo video từ nội dung mô tả",
     refLabel: null,
     endLabel: null,
     models: [
@@ -48,8 +49,8 @@ const MODE_CONFIG = {
     ],
   },
   i2v: {
-    desc: "🖼 Image → Video: Ảnh làm frame đầu, video chuyển động từ đó",
-    refLabel: "🖼 Start",
+    desc: "Ảnh sang video: dùng ảnh đầu vào để tạo chuyển động",
+    refLabel: "Ảnh đầu vào",
     endLabel: null,
     models: [
       { group: "🌄 Landscape (16:9)", opts: [
@@ -65,9 +66,9 @@ const MODE_CONFIG = {
     ],
   },
   fl: {
-    desc: "🎞 First+Last → Video: Ảnh đầu & cuối, AI tạo chuyển động giữa",
-    refLabel: "🎬 Start",
-    endLabel: "🏁 End",
+    desc: "Ảnh đầu và cuối: tạo chuyển động giữa hai khung hình",
+    refLabel: "Ảnh đầu vào",
+    endLabel: "Ảnh kết thúc",
     models: [
       { group: "🌄 Landscape (16:9)", opts: [
         { v: "fl_low_16_9",     l: "Low Fast 16:9 – 0 credits" },
@@ -82,8 +83,8 @@ const MODE_CONFIG = {
     ],
   },
   r2v: {
-    desc: "🎨 Reference → Video: Ảnh tham chiếu phong cách/nhân vật cho video",
-    refLabel: "🎨 Ref",
+    desc: "Ảnh tham chiếu: giữ phong cách hoặc nhân vật cho video",
+    refLabel: "Ảnh tham chiếu",
     endLabel: null,
     models: [
       { group: "🌄 Landscape (16:9)", opts: [
@@ -123,9 +124,9 @@ function showLogin() { document.getElementById("loginScreen").style.display = "f
 function showApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "block";
-  document.getElementById("userInfo").textContent = `👤 ${authUser.username} (${authUser.role})`;
+  document.getElementById("userInfo").textContent = `${authUser.username} (${roleLabel(authUser.role)})`;
   const planEl = document.getElementById("planInfo");
-  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
+  if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "Không giới hạn"; planEl.className = "plan-badge plan-active"; }
   else if (authUser.plan_active) { const days = Math.ceil((new Date(authUser.plan_expires_at) - new Date()) / 86400000); planEl.textContent = `📦 Còn ${days} ngày`; planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active"); }
   else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   document.getElementById("navAdmin").style.display = ["admin", "super_admin"].includes(authUser.role) ? "" : "none";
@@ -190,13 +191,13 @@ function setMode(mode) {
   const promptPct = 85 - imgCols * imgPct;
   document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
   document.getElementById("colRefHead").style.width = imgPct + "%";
-  document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh Ref";
+  document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh đầu vào";
   document.getElementById("colEndHead").style.display = hasEnd ? "" : "none";
   document.getElementById("colEndHead").style.width = imgPct + "%";
-  document.getElementById("colEndHead").textContent = cfg.endLabel || "Ảnh End";
+  document.getElementById("colEndHead").textContent = cfg.endLabel || "Ảnh kết thúc";
   document.querySelector(".col-prompt").style.width = promptPct + "%";
   document.getElementById("btnImportRef").style.display = hasRef ? "" : "none";
-  document.getElementById("btnImportRef").textContent = `📷 Import ${cfg.refLabel || "Ref"} tất cả`;
+  document.getElementById("btnImportRef").textContent = cfg.refLabel ? `Thêm ${cfg.refLabel.toLowerCase()} cho tất cả` : "Thêm ảnh cho tất cả";
   document.getElementById("btnImportEnd").style.display = hasEnd ? "" : "none";
   syncPromptSourceUI();
   renderBatchTable();
@@ -217,7 +218,7 @@ function setMode(mode) {
 function updateModelDesc() {
   const sel = document.getElementById("modelSelect");
   const opt = sel.options[sel.selectedIndex];
-  if (opt) document.getElementById("modelDesc").textContent = `Model: ${opt.text}`;
+  if (opt) document.getElementById("modelDesc").textContent = `Mô hình: ${opt.text}`;
 }
 
 // ── Ref/End Images ──
@@ -431,13 +432,13 @@ async function startGeneration() {
   // Validate ảnh theo mode
   if (currentMode === "i2v" || currentMode === "r2v") {
     const missing = prompts.findIndex((_, i) => !rowRefImages[i]);
-    if (missing >= 0) { sAlert(`Prompt #${missing + 1} chưa có ảnh. Dùng "Import tất cả" để gán nhanh.`); return; }
+    if (missing >= 0) { sAlert(`Dòng #${missing + 1} chưa có ảnh. Dùng nút thêm ảnh cho tất cả để gán nhanh.`); return; }
   }
   if (currentMode === "fl") {
     const missingStart = prompts.findIndex((_, i) => !rowRefImages[i]);
     const missingEnd   = prompts.findIndex((_, i) => !endRowImages[i]);
-    if (missingStart >= 0) { sAlert(`Prompt #${missingStart + 1} chưa có ảnh Start.`); return; }
-    if (missingEnd >= 0)   { sAlert(`Prompt #${missingEnd + 1} chưa có ảnh End.`); return; }
+    if (missingStart >= 0) { sAlert(`Dòng #${missingStart + 1} chưa có ảnh đầu vào.`); return; }
+    if (missingEnd >= 0)   { sAlert(`Dòng #${missingEnd + 1} chưa có ảnh kết thúc.`); return; }
   }
 
   document.getElementById("progressCard").style.display = "block";
@@ -590,7 +591,7 @@ function populateResultsTable() {
   const hasEnd = !!cfg.endLabel;
 
   if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; return; }
-  empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} prompt`;
+  empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} dòng`;
 
   let html = "", idx = 0;
   batchFiles.forEach(f => {
@@ -645,7 +646,7 @@ function updateResults(job) {
     if (v.urls && v.urls.length) {
       row.className = "row-done";
       row.cells[statusCellIdx].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${modeLabel(v.mode || currentMode)}</span>`;
-      row.cells[videoCellIdx].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">▶ Video ${i + 1}</a>`).join("");
+      row.cells[videoCellIdx].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">Video ${i + 1}</a>`).join("");
     } else if (v.error) {
       row.className = "row-error";
       row.cells[statusCellIdx].innerHTML = '<span class="status-err">❌ Lỗi</span>';
@@ -677,12 +678,12 @@ function updateResults(job) {
 
 function modeLabel(mode) {
   const labels = {
-    t2v: "📝 T2V",
-    i2v: "🖼 I2V",
-    fl: "🎞 FL",
-    r2v: "🎨 R2V",
+    t2v: "T2V",
+    i2v: "I2V",
+    fl: "FL",
+    r2v: "R2V",
   };
-  return labels[mode] || "🎬 Video";
+  return labels[mode] || "Video";
 }
 
 function syncPromptSourceUI() {
@@ -938,14 +939,14 @@ async function loadAdminUsers() {
     const tbody = document.getElementById("adminUserBody");
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
-      const planText = ["admin", "super_admin"].includes(u.role) ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
       return `<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td>
       <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "adminveo" ? "disabled" : ""}>
-        <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
-        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
-        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Super Admin</option>
+        <option value="user" ${u.role === "user" ? "selected" : ""}>Người dùng</option>
+        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Quản trị viên</option>
+        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Chủ hệ thống</option>
       </select></td>
       <td><span class="${planClass}">${planText}</span>
         ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
@@ -984,9 +985,9 @@ function updateAdminDashboard(users) {
 
   const summary = document.getElementById("adminSummaryList");
   const items = [
-    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm admin và super admin đang có quyền điều hành." },
-    { label: "Gói sắp hết hạn", value: `${expiringSoon} user`, note: "Ưu tiên gia hạn để tránh gián đoạn khi user gen video." },
-    { label: "Tài khoản bị khóa", value: `${lockedUsers} user`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
+    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm quản trị viên và chủ hệ thống đang có quyền điều hành." },
+    { label: "Gói sắp hết hạn", value: `${expiringSoon} tài khoản`, note: "Ưu tiên gia hạn để tránh gián đoạn khi người dùng tạo video." },
+    { label: "Tài khoản bị khóa", value: `${lockedUsers} tài khoản`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
   ];
   summary.innerHTML = items.map(item => `<div class="admin-summary-item"><strong>${item.label}</strong><span>${item.value}<br>${item.note}</span></div>`).join("");
 }
