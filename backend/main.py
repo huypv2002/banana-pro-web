@@ -578,12 +578,11 @@ def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
         "clientContext": {
             "sessionId": f";{int(_time.time() * 1000)}",
             "projectId": str(_uuid.uuid4()),
-            "tool": "BACKBONE", "userPaygateTier": "PAYGATE_TIER_TWO",
+            "tool": "PINHOLE", "userPaygateTier": "PAYGATE_TIER_TWO",
         },
         "requests": requests_body,
     }
-    client._maybe_inject_recaptcha(payload["clientContext"], raise_on_fail=False, recaptcha_action="VIDEO_GENERATION")
-    client._convert_to_recaptcha_context(payload["clientContext"])
+    # R2V không dùng recaptcha
     resp = client.session.post(url, headers=client._aisandbox_headers(), data=_json.dumps(payload), timeout=120)
     if resp.status_code == 200:
         data = resp.json()
