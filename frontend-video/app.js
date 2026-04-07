@@ -204,8 +204,8 @@ function refreshRefCells() {
         const thumbs = imgs.map((src, j) =>
           `<span class="ref-wrap"><img src="${src}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i},${j})">✕</span></span>`
         ).join("");
-        const addBtn = isR2V && imgs.length < 15 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>` : "";
-        row.cells[2].innerHTML = thumbs + addBtn;
+        const addBtn = isR2V && imgs.length < 15 ? `<span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>` : "";
+        row.cells[2].innerHTML = `<div class="ref-cell">${thumbs}${addBtn}</div>`;
       } else {
         row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ${cfg.refLabel}</span>`;
       }
@@ -213,7 +213,7 @@ function refreshRefCells() {
     if (cfg.endLabel) {
       const img = endRowImages[i];
       row.cells[3].innerHTML = img
-        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${i})">✕</span></span>`
+        ? `<div class="ref-cell"><span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${i})">✕</span></span></div>`
         : `<span class="ref-add-btn" onclick="importEndForRow(${i})">+ ${cfg.endLabel}</span>`;
     }
   });
@@ -448,7 +448,8 @@ function populateResultsTable() {
               const thumbs = imgs.map((src, j) =>
                 `<span class="ref-wrap"><img src="${src}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx},${j})">✕</span></span>`
               ).join("");
-              return thumbs + (isR2V && imgs.length < 15 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${idx})">+</span>` : "");
+              const addBtn = isR2V && imgs.length < 15 ? `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+</span>` : "";
+              return `<div class="ref-cell">${thumbs}${addBtn}</div>`;
             }
             return `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ${cfg.refLabel}</span>`;
           })()
