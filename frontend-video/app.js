@@ -230,7 +230,7 @@ function refreshRefCells() {
         const addBtn = isR2V && imgs.length < 15 ? `<span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>` : "";
         row.cells[2].innerHTML = `<div class="ref-cell">${thumbs}${addBtn}</div>`;
       } else {
-        row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ${cfg.refLabel}</span>`;
+        row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`;
       }
     }
     if (cfg.endLabel) {
@@ -238,7 +238,7 @@ function refreshRefCells() {
       const cellIdx = cfg.refLabel ? 3 : 2;
       row.cells[cellIdx].innerHTML = img
         ? `<div class="ref-cell"><span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${i})">✕</span></span></div>`
-        : `<span class="ref-add-btn" onclick="importEndForRow(${i})">+ ${cfg.endLabel}</span>`;
+        : `<span class="ref-add-btn" onclick="importEndForRow(${i})">+</span>`;
     }
   });
 }
@@ -479,13 +479,13 @@ function populateResultsTable() {
               const addBtn = isR2V && imgs.length < 15 ? `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+</span>` : "";
               return `<div class="ref-cell">${thumbs}${addBtn}</div>`;
             }
-            return `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ${cfg.refLabel}</span>`;
+            return `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+</span>`;
           })()
         : "";
       const endCell = hasEnd
         ? (endRowImages[idx]
             ? `<span class="ref-wrap"><img src="${endRowImages[idx]}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${idx})">✕</span></span>`
-            : `<span class="ref-add-btn" onclick="importEndForRow(${idx})">+ ${cfg.endLabel}</span>`)
+            : `<span class="ref-add-btn" onclick="importEndForRow(${idx})">+</span>`)
         : "";
       html += `<tr id="resRow${idx}">
         <td>${idx + 1}</td>

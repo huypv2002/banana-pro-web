@@ -323,7 +323,7 @@ function refreshRefCells() {
       ).join("");
       row.cells[2].innerHTML = `<div class="ref-cell">${thumbs}<span class="ref-add-btn" onclick="importRefForRow(${i})">+</span></div>`;
     } else {
-      row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
+      row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>`;
     }
   });
 }
@@ -920,7 +920,7 @@ function populateResultsTable() {
         const varLabel = variants > 1 ? ` <span style="color:var(--muted);font-size:0.7rem">[${v + 1}/${variants}]</span>` : "";
         const refCell = imgs.length
             ? `<div class="ref-cell">${imgs.map((s, ri) => `<span class="ref-wrap"><img src="${s}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${promptIdx},${ri})">✕</span></span>`).join("")}${v === 0 ? `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>` : ""}</div>`
-            : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+ ảnh</span>`;
+            : `<span class="ref-add-btn" onclick="importRefForRow(${promptIdx})">+</span>`;
         html += `<tr id="resRow${i}">
           <td>${i + 1}</td>
           <td><div class="prompt-cell">${esc(text)}${varLabel}</div></td>
