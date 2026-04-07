@@ -170,45 +170,27 @@ function updateModelDesc() {
 }
 
 // ── Ref/End Images ──
-function importRefAll() { refImportTargetRow = -1; document.getElementById("refBulkInput").click(); }
 function importEndAll() { endImportTargetRow = -1; document.getElementById("endBulkInput").click(); }
-function importRefForRow(idx) { refImportTargetRow = idx; document.getElementById("refRowInput").click(); }
+function importRefForRow(idx) {
+  refImportTargetRow = idx;
+  const input = document.getElementById("refRowInput");
+  input.multiple = currentMode === "r2v";
+  input.click();
+}
 function importEndForRow(idx) { endImportTargetRow = idx; document.getElementById("endRowInput").click(); }
 
-function _assignBulk(files, store, total, cb) {
-  let loaded = 0; const imgs = [];
-  files.forEach(file => { const r = new FileReader(); r.onload = e => { imgs.push(e.target.result); if (++loaded === files.length) { for (let i = 0; i < total; i++) store[i] = imgs.length === 1 ? imgs[0] : (imgs[i] || imgs[imgs.length - 1]); cb(); } }; r.readAsDataURL(file); });
-}
-function handleRefBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, rowRefImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
-function handleEndBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, endRowImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
-function handleRefRowImport(input) {
+function handleEndBulkImport(input) {
   const files = Array.from(input.files); if (!files.length) return;
-  const idx = refImportTargetRow;
-  const isR2V = currentMode === "r2v";
+  const total = batchFiles.flatMap(f => f.prompts).length;
   let loaded = 0; const imgs = [];
-  files.forEach(file => {
-    const r = new FileReader();
-    r.onload = e => {
-      imgs.push(e.target.result);
-      if (++loaded === files.length) {
-        if (isR2V) {
-          // Append to existing list, max 15
-          const existing = Array.isArray(rowRefImages[idx]) ? rowRefImages[idx] : (rowRefImages[idx] ? [rowRefImages[idx]] : []);
-          rowRefImages[idx] = [...existing, ...imgs].slice(0, 15);
-        } else {
-          rowRefImages[idx] = imgs[0]; // single image for i2v/fl
-        }
-        refreshRefCells();
-      }
-    };
-    r.readAsDataURL(file);
-  });
+  files.forEach(file => { const r = new FileReader(); r.onload = e => { imgs.push(e.target.result); if (++loaded === files.length) { for (let i = 0; i < total; i++) endRowImages[i] = imgs.length === 1 ? imgs[0] : (imgs[i] || imgs[imgs.length - 1]); refreshRefCells(); } }; r.readAsDataURL(file); });
   input.value = "";
 }
-function handleEndRowImport(input) { const file = input.files[0]; if (!file) return; const r = new FileReader(); r.onload = e => { endRowImages[endImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file); input.value = ""; }
-function clearRefAll() { rowRefImages = {}; endRowImages = {}; refreshRefCells(); }
-function removeRefImg(idx) { delete rowRefImages[idx]; refreshRefCells(); }
-function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
+function handleEndRowImport(input) {
+  const file = input.files[0]; if (!file) return;
+  const r = new FileReader(); r.onload = e => { endRowImages[endImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file);
+  input.value = "";
+}
 
 function refreshRefCells() {
   const cfg = MODE_CONFIG[currentMode];
@@ -285,18 +267,24 @@ function importRefAll() { refImportTargetRow = -1; document.getElementById("refB
 function handleRefBulkImport(input) {
   const files = Array.from(input.files); if (!files.length) return;
   const total = batchFiles.flatMap(f => f.prompts).length;
-  // 1 file → assign to all; multiple files → assign by index (cycle)
+  const isR2V = currentMode === "r2v";
   let loaded = 0; const imgs = [];
   files.forEach(file => {
     const r = new FileReader();
     r.onload = e => {
-      imgs.push({ name: file.name, b64: e.target.result });
-      if (++loaded === files.length) {
-        for (let i = 0; i < total; i++) {
-          rowRefImages[i] = imgs.length === 1 ? imgs[0].b64 : (imgs[i] ? imgs[i].b64 : imgs[imgs.length - 1].b64);
+      imgs.push(e.target.result);
+      if (++loaded !== files.length) return;
+      for (let i = 0; i < total; i++) {
+        const img = imgs.length === 1 ? imgs[0] : (imgs[i] || imgs[imgs.length - 1]);
+        if (isR2V) {
+          // R2V: append vào list hiện có, max 15
+          const existing = Array.isArray(rowRefImages[i]) ? rowRefImages[i] : (rowRefImages[i] ? [rowRefImages[i]] : []);
+          rowRefImages[i] = [...existing, img].slice(0, 15);
+        } else {
+          rowRefImages[i] = img; // I2V/FL: replace (chỉ 1 ảnh)
         }
-        refreshRefCells();
       }
+      refreshRefCells();
     };
     r.readAsDataURL(file);
   });
@@ -304,11 +292,25 @@ function handleRefBulkImport(input) {
 }
 
 function handleRefRowImport(input) {
-  const file = input.files[0]; if (!file) return;
+  const files = Array.from(input.files); if (!files.length) return;
   const idx = refImportTargetRow;
-  const r = new FileReader();
-  r.onload = e => { rowRefImages[idx] = e.target.result; refreshRefCells(); };
-  r.readAsDataURL(file);
+  const isR2V = currentMode === "r2v";
+  let loaded = 0; const imgs = [];
+  files.forEach(file => {
+    const r = new FileReader();
+    r.onload = e => {
+      imgs.push(e.target.result);
+      if (++loaded !== files.length) return;
+      if (isR2V) {
+        const existing = Array.isArray(rowRefImages[idx]) ? rowRefImages[idx] : (rowRefImages[idx] ? [rowRefImages[idx]] : []);
+        rowRefImages[idx] = [...existing, ...imgs].slice(0, 15);
+      } else {
+        rowRefImages[idx] = imgs[0];
+      }
+      refreshRefCells();
+    };
+    r.readAsDataURL(file);
+  });
   input.value = "";
 }
 
