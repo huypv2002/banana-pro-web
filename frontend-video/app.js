@@ -153,12 +153,18 @@ function setMode(mode) {
   updateModelDesc();
   const hasRef = !!cfg.refLabel;
   const hasEnd = !!cfg.endLabel;
+  // Tính width động: prompt luôn lớn nhất, ảnh chia đều phần còn lại
+  // Fixed: #=5%, status=10%, video=15% → còn 70% cho prompt+ảnh
+  const imgCols = (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
+  const imgPct  = imgCols === 0 ? 0 : imgCols === 1 ? 35 : 25; // mỗi cột ảnh
+  const promptPct = 70 - imgCols * imgPct;
   document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
-  document.getElementById("colRefHead").style.width = hasEnd ? "25%" : "50%";
+  document.getElementById("colRefHead").style.width = imgPct + "%";
   document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh Ref";
   document.getElementById("colEndHead").style.display = hasEnd ? "" : "none";
-  document.getElementById("colEndHead").style.width = "25%";
+  document.getElementById("colEndHead").style.width = imgPct + "%";
   document.getElementById("colEndHead").textContent = cfg.endLabel || "Ảnh End";
+  document.querySelector(".col-prompt").style.width = promptPct + "%";
   document.getElementById("btnImportRef").style.display = hasRef ? "" : "none";
   document.getElementById("btnImportRef").textContent = `📷 Import ${cfg.refLabel || "Ref"} tất cả`;
   document.getElementById("btnImportEnd").style.display = hasEnd ? "" : "none";

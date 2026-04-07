@@ -178,7 +178,7 @@ textarea { resize: vertical; }
 .results-table td { padding: 6px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
 .results-table tr:hover td { background: #f8fafc; }
 .results-table td:first-child { text-align: center; color: var(--muted); font-weight: 600; }
-.col-prompt { width: 30%; }
+.col-prompt { }
 .results-table .prompt-cell { font-size: 0.76rem; line-height: 1.4; max-height: 44px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .results-table .ref-thumb, .results-table .result-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; transition: transform .15s; }
 .results-table .result-thumb:hover { transform: scale(1.05); box-shadow: 0 2px 8px rgba(0,0,0,.15); }
