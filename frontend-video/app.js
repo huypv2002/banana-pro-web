@@ -12,6 +12,8 @@ let currentJobId = null;
 let pollInterval = null;
 let pollFailCount = 0;
 let currentMode = "t2v";
+let activeJobMode = null;
+let latestJobState = null;
 const modeBatchFiles = { t2v: [], i2v: [], fl: [], r2v: [] };
 const modeSourcePaths = {
   t2v: { txt: "", folder: "" },
@@ -188,7 +190,18 @@ function setMode(mode) {
   document.getElementById("workersInput").style.display = mode === "t2v" ? "" : "none";
   syncPromptSourceUI();
   renderBatchTable();
-  if (!currentJobId) populateResultsTable();
+  populateResultsTable();
+  if (currentJobId && activeJobMode === currentMode && latestJobState) {
+    updateProgress(latestJobState);
+    updateResults(latestJobState);
+    document.getElementById("progressCard").style.display = "block";
+    document.getElementById("runBtn").disabled = true;
+    document.getElementById("stopBtn").disabled = false;
+  } else {
+    clearProgressUI();
+    document.getElementById("runBtn").disabled = false;
+    document.getElementById("stopBtn").disabled = true;
+  }
 }
 
 function updateModelDesc() {
@@ -442,6 +455,8 @@ async function startGeneration() {
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
     currentJobId = job.job_id;
+    activeJobMode = currentMode;
+    latestJobState = job;
     startPolling();
   } catch (e) {
     sAlert("Lỗi: " + e.message, "error");
@@ -460,8 +475,11 @@ function startPolling() {
       if (!res.ok) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối server", "error"); resetUI(); } return; }
       pollFailCount = 0;
       const job = await res.json();
-      updateProgress(job);
-      updateResults(job);
+      latestJobState = job;
+      if (currentMode === activeJobMode) {
+        updateProgress(job);
+        updateResults(job);
+      }
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval); currentJobId = null; resetUI();
         if (job.status === "error") sAlert(job.error || "Lỗi", "error");
@@ -479,9 +497,25 @@ async function stopGeneration() {
 }
 
 function resetUI() {
+  activeJobMode = null;
+  latestJobState = null;
   document.getElementById("runBtn").disabled = false;
   document.getElementById("stopBtn").disabled = true;
+  clearProgressUI();
+}
+
+function clearProgressUI() {
   document.getElementById("progressCard").style.display = "none";
+  document.getElementById("progressFill").style.width = "0%";
+  document.getElementById("progressText").textContent = "0 / 0 prompt (0%)";
+  const progressBadge = document.getElementById("progressBadge");
+  progressBadge.className = "badge badge-pending";
+  progressBadge.textContent = "Chờ";
+  const statusBadge = document.getElementById("statusBadge");
+  if (statusBadge) {
+    statusBadge.className = "";
+    statusBadge.textContent = "";
+  }
 }
 
 function updateProgress(job) {
