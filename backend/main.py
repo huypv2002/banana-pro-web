@@ -637,14 +637,29 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         cookies = _parse_cookie_input(cookie)
         if not cookies:
             raise ValueError("Cookie không hợp lệ.")
-        client = get_client_with_fallback(cookies)
-        project_id = client.flow_project_id
+
+        # Tạo sẵn clients cho từng profile (dùng cho parallel T2V)
+        all_profiles = get_all_profiles() or [None]
+        # Client chính (profile đầu tiên thành công) — dùng cho sequential modes
+        main_client = get_client_with_fallback(cookies)
+        main_project_id = main_client.flow_project_id
         upload_cache = {}
 
-        def process_prompt(idx, prompt):
+        def make_client(worker_idx: int):
+            """Tạo client cho worker, dùng profile round-robin."""
+            profile = all_profiles[worker_idx % len(all_profiles)]
+            c = LabsFlowClient(cookies, profile_path=profile)
+            if c.fetch_access_token():
+                return c
+            return main_client  # fallback
+
+        def process_prompt(idx, prompt, client=None):
             """Xử lý 1 prompt, trả về result dict."""
             if job.get("cancelled"):
                 return {"prompt": prompt, "urls": [], "error": "Cancelled"}
+            if client is None:
+                client = main_client
+            project_id = client.flow_project_id or main_project_id
             try:
                 ref_raw = ref_images.get(str(idx))
                 ref_b64_list = ref_raw if isinstance(ref_raw, list) else ([ref_raw] if ref_raw else [])
@@ -696,13 +711,14 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             for i, p in enumerate(prompts):
                 task_q.put((i, p))
 
-            def worker():
+            def worker(worker_id):
+                w_client = make_client(worker_id)
                 while not job.get("cancelled"):
                     try:
                         idx, prompt = task_q.get_nowait()
                     except _queue.Empty:
                         break
-                    res = process_prompt(idx, prompt)
+                    res = process_prompt(idx, prompt, w_client)
                     with lock:
                         results[idx] = res
                         job["completed"] += 1
@@ -714,7 +730,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
 
             threads = []
             for w in range(num_w):
-                t = threading.Thread(target=worker, daemon=True)
+                t = threading.Thread(target=worker, args=(w,), daemon=True)
                 threads.append(t)
                 t.start()
                 if w < num_w - 1:
@@ -728,7 +744,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             for idx, prompt in enumerate(prompts):
                 if job.get("cancelled"):
                     break
-                res = process_prompt(idx, prompt)
+                res = process_prompt(idx, prompt, main_client)
                 job["videos"].append(res)
                 job["completed"] += 1
                 if idx < len(prompts) - 1 and not job.get("cancelled"):
