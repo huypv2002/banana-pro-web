@@ -686,6 +686,10 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                         results[idx] = res
                         job["completed"] += 1
                         job["videos"] = [r for r in results if r is not None]
+                        # Set done ngay khi tất cả hoàn thành
+                        if job["completed"] >= job["total"]:
+                            job["videos"] = [r if r else {"prompt": prompts[i], "urls": [], "error": "Cancelled"} for i, r in enumerate(results)]
+                            job["status"] = "done"
 
             threads = []
             for w in range(num_w):
