@@ -562,32 +562,33 @@ def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
                   model_key: str, num_videos: int, aspect: str):
     import uuid as _uuid, time as _time, json as _json
     url = "https://aisandbox-pa.googleapis.com/v1/video:batchAsyncGenerateVideoReferenceImages"
-    # R2V dùng veo_3_0 models (không phải veo_3_1)
-    r2v_key = "veo_3_0_r2v_fast_ultra_relaxed" if "relaxed" in model_key else "veo_3_0_r2v_fast_ultra"
     seeds = [int(_time.time() * 1000000 + i) % 100000 for i in range(num_videos)]
     requests_body = [{
         "aspectRatio": aspect,
-        "metadata": {"sceneId": str(_uuid.uuid4())},
-        "referenceImages": [{"imageUsageType": "IMAGE_USAGE_TYPE_ASSET", "mediaId": mid} for mid in media_ids],
         "seed": seeds[i],
-        "textInput": {"prompt": prompt.strip()},
-        "videoModelKey": r2v_key,
+        "textInput": {"structuredPrompt": {"parts": [{"text": prompt.strip()}]}},
+        "videoModelKey": model_key,
+        "metadata": {},
+        "referenceImages": [{"mediaId": mid, "imageUsageType": "IMAGE_USAGE_TYPE_ASSET"} for mid in media_ids],
     } for i in range(num_videos)]
-    # R2V dùng random projectId (không phải flow_project_id)
     payload = {
+        "mediaGenerationContext": {"batchId": str(_uuid.uuid4())},
         "clientContext": {
             "sessionId": f";{int(_time.time() * 1000)}",
             "projectId": str(_uuid.uuid4()),
             "tool": "PINHOLE", "userPaygateTier": "PAYGATE_TIER_TWO",
         },
         "requests": requests_body,
+        "useV2ModelConfig": True,
     }
-    # R2V không dùng recaptcha
+    # Inject recaptcha (dùng recaptchaContext format)
+    client._maybe_inject_recaptcha(payload["clientContext"], raise_on_fail=False, recaptcha_action="VIDEO_GENERATION")
+    client._convert_to_recaptcha_context(payload["clientContext"])
     resp = client.session.post(url, headers=client._aisandbox_headers(), data=_json.dumps(payload), timeout=120)
     if resp.status_code == 200:
         data = resp.json()
         return data.get("operations", [data])
-    client.last_error_detail = f"R2V HTTP {resp.status_code}: {resp.text[:200]}"
+    client.last_error_detail = f"R2V HTTP {resp.status_code}: {resp.text[:300]}"
     return None
 
 
