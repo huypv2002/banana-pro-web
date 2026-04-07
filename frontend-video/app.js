@@ -13,8 +13,11 @@ let currentJobId = null;
 let pollInterval = null;
 let pollFailCount = 0;
 let currentMode = "t2v";
-let rowRefImages = {};  // {idx: base64} — start/ref image
-let endRowImages = {};  // {idx: base64} — end image (FL mode only)
+// Per-mode image stores — không share giữa các tab
+const modeRefImages = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
+const modeEndImages = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
+let rowRefImages = modeRefImages.t2v;
+let endRowImages = modeEndImages.t2v;
 let refImportTargetRow = -1;
 let endImportTargetRow = -1;
 
@@ -143,6 +146,9 @@ async function handleAuth(e) {
 // ── Video Mode ──
 function setMode(mode) {
   currentMode = mode;
+  // Switch sang store riêng của mode này
+  rowRefImages = modeRefImages[mode];
+  endRowImages = modeEndImages[mode];
   const cfg = MODE_CONFIG[mode];
   Object.keys(MODE_CONFIG).forEach(m => document.getElementById(`modeBtn_${m}`)?.classList.toggle("active", m === mode));
   document.getElementById("modeDesc").textContent = cfg.desc;
@@ -156,7 +162,7 @@ function setMode(mode) {
   // Tính width động: prompt luôn lớn nhất, ảnh chia đều phần còn lại
   // Fixed: #=5%, status=10%, video=15% → còn 70% cho prompt+ảnh
   const imgCols = (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
-  const imgPct  = imgCols === 0 ? 0 : imgCols === 1 ? 40 : 25;
+  const imgPct  = imgCols === 0 ? 0 : imgCols === 1 ? 38 : 22;
   const promptPct = 85 - imgCols * imgPct;
   document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
   document.getElementById("colRefHead").style.width = imgPct + "%";
@@ -200,6 +206,15 @@ function handleEndRowImport(input) {
   input.value = "";
 }
 
+function _renderRefCell(imgs, isR2V, addFn) {
+  if (!imgs.length) return `<span class="ref-add-btn" onclick="${addFn}">+</span>`;
+  const thumbs = imgs.map((src, j) =>
+    `<span class="ref-wrap"><img src="${src}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${j === undefined ? '' : j})">✕</span></span>`
+  ).join("");
+  const addBtn = isR2V && imgs.length < 15 ? `<span class="ref-add-btn" onclick="${addFn}">+</span>` : "";
+  return `<div class="ref-cell">${thumbs}${addBtn}</div>`;
+}
+
 function refreshRefCells() {
   const cfg = MODE_CONFIG[currentMode];
   batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
@@ -220,7 +235,8 @@ function refreshRefCells() {
     }
     if (cfg.endLabel) {
       const img = endRowImages[i];
-      row.cells[3].innerHTML = img
+      const cellIdx = cfg.refLabel ? 3 : 2;
+      row.cells[cellIdx].innerHTML = img
         ? `<div class="ref-cell"><span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeEndImg(${i})">✕</span></span></div>`
         : `<span class="ref-add-btn" onclick="importEndForRow(${i})">+ ${cfg.endLabel}</span>`;
     }
@@ -322,7 +338,11 @@ function handleRefRowImport(input) {
   input.value = "";
 }
 
-function clearRefAll() { rowRefImages = {}; endRowImages = {}; refreshRefCells(); }
+function clearRefAll() {
+  modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
+  modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  refreshRefCells();
+}
 function removeRefImg(idx, imgIdx = null) {
   if (imgIdx !== null && Array.isArray(rowRefImages[idx])) {
     rowRefImages[idx].splice(imgIdx, 1);

@@ -192,7 +192,9 @@ textarea { resize: vertical; }
 .results-table .result-actions a { font-size: 0.68rem; color: var(--blue); text-decoration: none; font-weight: 600; }
 .results-table .result-actions a:hover { text-decoration: underline; }
 /* Ref image cell: thumbnails nằm ngang, tối đa 2 hàng */
-.ref-cell { display: flex; flex-wrap: wrap; gap: 3px; max-height: 98px; overflow: hidden; align-content: flex-start; }
+.ref-cell { display: flex; flex-wrap: wrap; gap: 3px; max-height: 98px; overflow: hidden; align-content: flex-start; justify-content: center; }
+.results-table th, .results-table td { text-align: center; vertical-align: middle; }
+.results-table th.col-prompt, .results-table td:nth-child(2) { text-align: left; }
 
 /* ── History Folder View ──────────────────────────────────────────────────── */
 .hist-folder { display:flex; align-items:center; gap:12px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; transition:all .15s; }
