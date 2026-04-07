@@ -796,6 +796,7 @@ async function loadAdminUsers() {
     if (!res.ok) return;
     const users = await res.json();
     const now = new Date().toISOString();
+    updateAdminDashboard(users);
     const tbody = document.getElementById("adminUserBody");
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
@@ -826,6 +827,32 @@ async function loadAdminUsers() {
   } catch (e) {}
 }
 
+function updateAdminDashboard(users) {
+  const now = new Date().toISOString();
+  const totalUsers = users.length;
+  const activePlans = users.filter(u => ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now)).length;
+  const lockedUsers = users.filter(u => !!u.disabled).length;
+  const admins = users.filter(u => ["admin", "super_admin"].includes(u.role)).length;
+  const expiringSoon = users.filter(u => {
+    if (!u.plan_expires_at || ["admin", "super_admin"].includes(u.role)) return false;
+    const diff = new Date(u.plan_expires_at) - new Date();
+    return diff > 0 && diff <= 3 * 86400000;
+  }).length;
+
+  document.getElementById("adminStatUsers").textContent = String(totalUsers);
+  document.getElementById("adminStatPlans").textContent = String(activePlans);
+  document.getElementById("adminStatLocked").textContent = String(lockedUsers);
+  document.getElementById("adminWorkspaceMeta").textContent = `${admins} tài khoản quản trị, ${expiringSoon} gói sắp hết hạn và ${lockedUsers} tài khoản đang bị khóa.`;
+
+  const summary = document.getElementById("adminSummaryList");
+  const items = [
+    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm admin và super admin đang có quyền điều hành." },
+    { label: "Gói sắp hết hạn", value: `${expiringSoon} user`, note: "Ưu tiên gia hạn để tránh gián đoạn khi user gen ảnh." },
+    { label: "Tài khoản bị khóa", value: `${lockedUsers} user`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
+  ];
+  summary.innerHTML = items.map(item => `<div class="admin-summary-item"><strong>${item.label}</strong><span>${item.value}<br>${item.note}</span></div>`).join("");
+}
+
 async function adminAddUser() {
   const username = document.getElementById("adminNewUser").value.trim();
   const password = document.getElementById("adminNewPass").value;
@@ -853,6 +880,7 @@ async function loadAdminHistory() {
     const res = await apiFetch("/admin/history?limit=50");
     if (!res.ok) return;
     const items = await res.json();
+    document.getElementById("adminStatHistory").textContent = String(items.length);
     const grid = document.getElementById("adminHistoryGrid");
     grid.innerHTML = "";
     if (!items.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>'; return; }
