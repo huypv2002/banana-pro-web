@@ -561,7 +561,9 @@ def _upload_b64(client, b64: str, cache: dict = None) -> str:
 def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
                   model_key: str, num_videos: int, aspect: str):
     import uuid as _uuid, time as _time, json as _json
-    url = "https://aisandbox-pa.googleapis.com/v1/video:batchAsyncGenerateVideoIntegrateImages"
+    url = "https://aisandbox-pa.googleapis.com/v1/video:batchAsyncGenerateVideoReferenceImages"
+    # R2V dùng veo_3_0 models (không phải veo_3_1)
+    r2v_key = "veo_3_0_r2v_fast_ultra_relaxed" if "relaxed" in model_key else "veo_3_0_r2v_fast_ultra"
     seeds = [int(_time.time() * 1000000 + i) % 100000 for i in range(num_videos)]
     requests_body = [{
         "aspectRatio": aspect,
@@ -569,12 +571,14 @@ def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
         "referenceImages": [{"imageUsageType": "IMAGE_USAGE_TYPE_ASSET", "mediaId": mid} for mid in media_ids],
         "seed": seeds[i],
         "textInput": {"prompt": prompt.strip()},
-        "videoModelKey": model_key,
+        "videoModelKey": r2v_key,
     } for i in range(num_videos)]
+    # R2V dùng random projectId (không phải flow_project_id)
     payload = {
         "clientContext": {
             "sessionId": f";{int(_time.time() * 1000)}",
-            "projectId": project_id, "tool": "BACKBONE", "userPaygateTier": "PAYGATE_TIER_TWO",
+            "projectId": str(_uuid.uuid4()),
+            "tool": "BACKBONE", "userPaygateTier": "PAYGATE_TIER_TWO",
         },
         "requests": requests_body,
     }
