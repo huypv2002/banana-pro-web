@@ -475,13 +475,14 @@ VIDEO_R2V_MODEL_MAP = {
 class VideoGenerateRequest(BaseModel):
     cookie: str = ""
     prompts: List[str]
-    mode: str = "t2v"              # t2v | i2v | fl | r2v
-    model: str = "t2v_fast_16_9"  # model key cho mode đang dùng
+    mode: str = "t2v"
+    model: str = "t2v_fast_16_9"
     num_videos: int = 1
-    # Per-prompt images: {promptIndex: base64}
-    ref_images: dict = {}          # i2v: start image; r2v: reference image
-    end_images: dict = {}          # fl: end image (start = ref_images)
-    # Legacy fields
+    ref_images: dict = {}
+    end_images: dict = {}
+    delay: int = 3        # giây delay giữa các prompt (tuần tự)
+    workers: int = 3      # số worker song song (chỉ T2V)
+    # Legacy
     t2v_model: str = ""
     i2v_model: str = ""
 
@@ -507,7 +508,8 @@ async def generate_video(req: VideoGenerateRequest):
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_video_generation,
                          job_id, req.cookie, req.prompts, req.mode, req.model,
-                         req.num_videos, req.ref_images or {}, req.end_images or {})
+                         req.num_videos, req.ref_images or {}, req.end_images or {},
+                         req.delay, req.workers)
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 
@@ -588,7 +590,8 @@ def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
 
 def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                           mode: str, model: str, num_videos: int,
-                          ref_images: dict = None, end_images: dict = None):
+                          ref_images: dict = None, end_images: dict = None,
+                          delay: int = 3, workers: int = 3):
     job = jobs[job_id]
     job["status"] = "running"
     ref_images = ref_images or {}
@@ -598,7 +601,8 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
     MAP = {"t2v": VIDEO_MODEL_MAP, "i2v": VIDEO_I2V_MODEL_MAP,
            "fl": VIDEO_FL_MODEL_MAP, "r2v": VIDEO_R2V_MODEL_MAP}
     model_key = MAP.get(mode, VIDEO_MODEL_MAP).get(model, "veo_3_1_t2v_fast_ultra")
-    logger.info(f"[VIDEO {job_id}] mode={mode}, key={model_key}, aspect={aspect}, prompts={len(prompts)}")
+    logger.info(f"[VIDEO {job_id}] mode={mode}, key={model_key}, prompts={len(prompts)}, workers={workers if mode=='t2v' else 1}, delay={delay}s")
+
     try:
         cookies = _parse_cookie_input(cookie)
         if not cookies:
@@ -607,14 +611,14 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token.")
         project_id = client.flow_project_id
-        upload_cache = {}  # {b64_hash: media_id} — cache per job
+        upload_cache = {}
 
-        for idx, prompt in enumerate(prompts):
+        def process_prompt(idx, prompt):
+            """Xử lý 1 prompt, trả về result dict."""
             if job.get("cancelled"):
-                break
+                return {"prompt": prompt, "urls": [], "error": "Cancelled"}
             try:
                 ref_raw = ref_images.get(str(idx))
-                # ref_raw có thể là string (1 ảnh) hoặc list (nhiều ảnh cho R2V)
                 ref_b64_list = ref_raw if isinstance(ref_raw, list) else ([ref_raw] if ref_raw else [])
                 ref_b64 = ref_b64_list[0] if ref_b64_list else None
                 end_b64 = end_images.get(str(idx))
@@ -624,7 +628,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
                         prompt=prompt, model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
                 elif mode == "i2v":
-                    if not ref_b64: raise ValueError("Prompt này chưa có ảnh Start")
+                    if not ref_b64: raise ValueError("Chưa có ảnh Start")
                     result = client.generate_videos_from_image(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
                         prompt=prompt, media_id=_upload_b64(client, ref_b64, upload_cache),
@@ -638,7 +642,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                         end_media_id=_upload_b64(client, end_b64, upload_cache),
                         model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
                 elif mode == "r2v":
-                    if not ref_b64_list: raise ValueError("Prompt này chưa có ảnh tham chiếu")
+                    if not ref_b64_list: raise ValueError("Chưa có ảnh tham chiếu")
                     media_ids = [_upload_b64(client, b64, upload_cache) for b64 in ref_b64_list[:15]]
                     result = _generate_r2v(client, project_id, prompt, media_ids, model_key, num_videos, aspect)
                 else:
@@ -646,13 +650,56 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
 
                 if result:
                     urls = _poll_video_status(client, result if isinstance(result, list) else [result], job_id, idx)
-                    job["videos"].append({"prompt": prompt, "urls": urls, "mode": mode})
-                else:
-                    job["videos"].append({"prompt": prompt, "urls": [], "error": client.last_error_detail or "Thất bại"})
+                    return {"prompt": prompt, "urls": urls, "mode": mode}
+                return {"prompt": prompt, "urls": [], "error": client.last_error_detail or "Thất bại"}
             except Exception as e:
-                job["videos"].append({"prompt": prompt, "urls": [], "error": str(e)})
-            finally:
+                return {"prompt": prompt, "urls": [], "error": str(e)}
+
+        if mode == "t2v":
+            # Parallel workers với nối đuôi (queue-based)
+            import threading, queue as _queue
+            num_w = max(1, min(workers, len(prompts)))
+            results = [None] * len(prompts)
+            task_q = _queue.Queue()
+            lock = threading.Lock()
+
+            for i, p in enumerate(prompts):
+                task_q.put((i, p))
+
+            def worker():
+                while not job.get("cancelled"):
+                    try:
+                        idx, prompt = task_q.get_nowait()
+                    except _queue.Empty:
+                        break
+                    res = process_prompt(idx, prompt)
+                    with lock:
+                        results[idx] = res
+                        job["completed"] += 1
+                        job["videos"] = [r for r in results if r is not None]
+
+            threads = []
+            for w in range(num_w):
+                t = threading.Thread(target=worker, daemon=True)
+                threads.append(t)
+                t.start()
+                if w < num_w - 1:
+                    time.sleep(delay)  # stagger start
+            for t in threads:
+                t.join()
+
+            job["videos"] = [r if r else {"prompt": prompts[i], "urls": [], "error": "Cancelled"} for i, r in enumerate(results)]
+        else:
+            # Tuần tự với delay
+            for idx, prompt in enumerate(prompts):
+                if job.get("cancelled"):
+                    break
+                res = process_prompt(idx, prompt)
+                job["videos"].append(res)
                 job["completed"] += 1
+                if idx < len(prompts) - 1 and not job.get("cancelled"):
+                    time.sleep(delay)
+
         job["status"] = "done"
     except Exception as e:
         logger.error(f"[VIDEO {job_id}] Fatal: {e}")

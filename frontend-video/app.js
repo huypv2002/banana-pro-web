@@ -174,6 +174,9 @@ function setMode(mode) {
   document.getElementById("btnImportRef").style.display = hasRef ? "" : "none";
   document.getElementById("btnImportRef").textContent = `📷 Import ${cfg.refLabel || "Ref"} tất cả`;
   document.getElementById("btnImportEnd").style.display = hasEnd ? "" : "none";
+  // Workers chỉ hiện cho T2V
+  document.getElementById("labelWorkers").style.display = mode === "t2v" ? "" : "none";
+  document.getElementById("workersInput").style.display = mode === "t2v" ? "" : "none";
   if (!currentJobId) populateResultsTable();
 }
 
@@ -391,7 +394,9 @@ async function startGeneration() {
   });
 
   try {
-    const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap };
+    const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap,
+                   delay: parseInt(document.getElementById("delayInput").value) || 3,
+                   workers: parseInt(document.getElementById("workersInput").value) || 3 };
     const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
