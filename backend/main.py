@@ -656,8 +656,10 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                     raise ValueError(f"Mode không hợp lệ: {mode}")
 
                 if result:
-                    urls = _poll_video_status(client, result if isinstance(result, list) else [result], job_id, idx)
-                    return {"prompt": prompt, "urls": urls, "mode": mode}
+                    urls, poll_err = _poll_video_status(client, result if isinstance(result, list) else [result], job_id, idx)
+                    if urls:
+                        return {"prompt": prompt, "urls": urls, "mode": mode}
+                    return {"prompt": prompt, "urls": [], "error": poll_err or "Tạo video thất bại"}
                 return {"prompt": prompt, "urls": [], "error": client.last_error_detail or "Thất bại"}
             except Exception as e:
                 return {"prompt": prompt, "urls": [], "error": str(e)}
@@ -743,7 +745,7 @@ def _extract_video_urls(obj):
 
 
 def _poll_video_status(client, operations, job_id, prompt_idx, max_wait=600):
-    """Poll video generation status until done or timeout."""
+    """Poll video generation status. Returns (urls, error_msg)."""
     start = time.time()
     poll_interval = 5
     while time.time() - start < max_wait:
@@ -757,22 +759,29 @@ def _poll_video_status(client, operations, job_id, prompt_idx, max_wait=600):
                 time.sleep(poll_interval)
                 continue
 
-            completed = 0
-            failed = 0
+            completed = failed = 0
             total = len(ops)
+            fail_reasons = []
             for op in ops:
                 op_status = (op.get("status") or "").upper()
                 if "COMPLETE" in op_status or "SUCCESS" in op_status:
                     completed += 1
                 elif "FAIL" in op_status or "ERROR" in op_status:
                     failed += 1
+                    # Try extract error message
+                    err = op.get("error") or op.get("errorMessage") or op.get("message") or ""
+                    if err:
+                        fail_reasons.append(str(err)[:100])
 
             if completed + failed >= total:
                 urls = _extract_video_urls(status)
                 logger.info(f"[VIDEO {job_id}][{prompt_idx}] Done: {len(urls)} videos ({completed} ok, {failed} fail)")
-                return urls
+                if not urls and failed > 0:
+                    err_msg = "; ".join(fail_reasons) if fail_reasons else f"Tạo video thất bại ({failed}/{total} fail)"
+                    return [], err_msg
+                return urls, None
         except Exception as e:
             logger.warning(f"[VIDEO {job_id}][{prompt_idx}] Poll error: {e}")
         time.sleep(poll_interval)
     logger.warning(f"[VIDEO {job_id}][{prompt_idx}] Timeout after {max_wait}s")
-    return []
+    return [], "Timeout: video chưa hoàn thành sau 10 phút"
