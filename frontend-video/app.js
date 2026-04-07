@@ -154,8 +154,10 @@ function setMode(mode) {
   const hasRef = !!cfg.refLabel;
   const hasEnd = !!cfg.endLabel;
   document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
+  document.getElementById("colRefHead").style.width = hasEnd ? "25%" : "50%";
   document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh Ref";
   document.getElementById("colEndHead").style.display = hasEnd ? "" : "none";
+  document.getElementById("colEndHead").style.width = "25%";
   document.getElementById("colEndHead").textContent = cfg.endLabel || "Ảnh End";
   document.getElementById("btnImportRef").style.display = hasRef ? "" : "none";
   document.getElementById("btnImportRef").textContent = `📷 Import ${cfg.refLabel || "Ref"} tất cả`;
