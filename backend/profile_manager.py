@@ -81,16 +81,10 @@ class ChromeThread(QThread):
                 "https://labs.google/fx/tools/flow",
             ]
         else:
-            # Extension mode: mở Chrome visible, sau đó mở tab chrome://extensions
-            # Dùng 2 lần gọi: lần 1 khởi động, lần 2 mở tab mới
-            args = base_args + ["--new-window", "--start-maximized"]
+            # Extension mode: mở Chrome visible, extensions enabled, user tự navigate
+            args = base_args + ["--start-maximized"]
         try:
             proc = subprocess.Popen(args)
-            if self.mode == "extension":
-                import time
-                time.sleep(2)  # Đợi Chrome khởi động
-                # Mở chrome://extensions trong tab mới bằng cách gọi Chrome lần 2
-                subprocess.Popen([CHROME_PATH, f"--user-data-dir={self.profile_path}", "chrome://extensions/"])
             proc.wait()
         except Exception:
             pass
