@@ -23,6 +23,10 @@ let batchFiles = [];
 let refImages = {};
 let refDirImages = [];
 let folderStructure = {};
+let adminSection = "overview";
+let adminHistoryMedia = "";
+let adminHistoryState = { userId: null, username: "", jobId: null, batchName: "", fileName: null };
+let adminCookieUserId = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -130,7 +134,7 @@ function showTab(tab) {
     if (nav) nav.classList.toggle("active", t.toLowerCase() === tab);
   });
   if (tab === "history") loadHistory();
-  if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { loadAdminUsers(); loadAdminHistory(); }
+  if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { switchAdminSection(adminSection || "overview"); }
 }
 
 // ── Cookie Management (D1) ───────────────────────────────────────────────────
@@ -825,6 +829,26 @@ async function loadAdminUsers() {
       </td>
     </tr>`;
     }).join("");
+    const planBody = document.getElementById("adminPlanBody");
+    if (planBody) {
+      planBody.innerHTML = users.map(u => {
+        const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
+        const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+        return `<tr>
+          <td>${u.id}</td>
+          <td>${esc(u.username)}</td>
+          <td>${roleLabel(u.role)}</td>
+          <td><span class="${planActive ? "status-ok" : "status-err"}">${planText}</span></td>
+          <td>
+            ${!["admin", "super_admin"].includes(u.role) ? `
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7 ngày</button>
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30 ngày</button>
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},90)">+90 ngày</button>
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem;color:var(--error)" onclick="adminSetPlan(${u.id},0)">Hủy gói</button>` : "—"}
+          </td>
+        </tr>`;
+      }).join("");
+    }
   } catch (e) {}
 }
 
@@ -898,6 +922,174 @@ async function loadAdminHistory() {
       grid.appendChild(card);
     });
   } catch (e) {}
+}
+
+function switchAdminSection(section) {
+  adminSection = section;
+  ["overview", "users", "plans", "cookies", "history"].forEach(key => {
+    document.getElementById(`adminPane${key.charAt(0).toUpperCase() + key.slice(1)}`).style.display = key === section ? "" : "none";
+    document.getElementById(`adminNav${key.charAt(0).toUpperCase() + key.slice(1)}`)?.classList.toggle("active", key === section);
+  });
+  if (section === "overview" || section === "users" || section === "plans") loadAdminUsers();
+  if (section === "overview") loadAdminHistory();
+  if (section === "cookies") loadAdminCookieUsers();
+  if (section === "history") loadAdminHistoryUsers();
+}
+
+async function loadAdminCookieUsers() {
+  const res = await apiFetch("/admin/cookies?group=users");
+  if (!res.ok) return;
+  const users = await res.json();
+  const box = document.getElementById("adminCookieUsers");
+  box.innerHTML = users.map(u => `
+    <div class="hist-folder" onclick="openAdminCookieUser(${u.user_id},'${esc(u.username)}')">
+      <div class="hist-folder-info">
+        <div class="hist-folder-name">${esc(u.username)}</div>
+        <div class="hist-folder-meta">${u.count} cookie</div>
+      </div>
+    </div>`).join("") || '<div class="empty-state"><div>Chưa có cookie</div></div>';
+  document.getElementById("adminCookieTitle").textContent = "Kho cookie theo tài khoản";
+  document.getElementById("adminCookieBody").innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px">Chọn một tài khoản để xem cookie</td></tr>';
+}
+
+async function openAdminCookieUser(userId, username) {
+  adminCookieUserId = userId;
+  document.getElementById("adminCookieTitle").textContent = `Kho cookie của ${username}`;
+  const res = await apiFetch(`/admin/cookies?user_id=${userId}`);
+  if (!res.ok) return;
+  const items = await res.json();
+  document.getElementById("adminCookieBody").innerHTML = items.map(c => `<tr>
+    <td>${c.id}</td>
+    <td>${esc(c.username)}</td>
+    <td style="font-family:monospace">${esc((c.cookie_hash || "").slice(0, 16))}...</td>
+    <td>${esc(c.email || "—")}</td>
+    <td>${esc(c.status || "pending")}</td>
+    <td>${c.created_at ? new Date(c.created_at + "Z").toLocaleString("vi-VN") : "—"}</td>
+    <td><button class="btn btn-red btn-sm" onclick="adminDeleteCookie(${c.id})">Xóa</button></td>
+  </tr>`).join("") || '<tr><td colspan="7" style="text-align:center;padding:16px">Tài khoản này chưa có cookie</td></tr>';
+}
+
+async function adminDeleteCookie(id) {
+  if (!await sConfirm("Xóa cookie này khỏi hệ thống?")) return;
+  await apiFetch(`/admin/cookies/${id}`, { method: "DELETE" });
+  if (adminCookieUserId) openAdminCookieUser(adminCookieUserId, document.getElementById("adminCookieTitle").textContent.replace("Kho cookie của ", ""));
+}
+
+async function loadAdminHistoryUsers() {
+  adminHistoryState = { userId: null, username: "", jobId: null, batchName: "", fileName: null };
+  document.getElementById("adminHistoryBack").style.display = "none";
+  document.getElementById("adminHistoryTitle").textContent = "Lịch sử toàn hệ thống";
+  document.getElementById("adminHistoryDesc").textContent = "Chọn một tài khoản bên trái để mở theo cây thư mục.";
+  const res = await apiFetch(`/admin/history/users${adminHistoryMedia ? `?media_type=${adminHistoryMedia}` : ""}`);
+  if (!res.ok) return;
+  const users = await res.json();
+  document.getElementById("adminHistoryFolders").innerHTML = users.map(u => `
+    <div class="hist-folder" onclick="openAdminHistoryUser(${u.user_id},'${esc(u.username)}')">
+      <div class="hist-folder-info">
+        <div class="hist-folder-name">${esc(u.username)}</div>
+        <div class="hist-folder-meta">${u.count} mục</div>
+      </div>
+    </div>`).join("") || '<div class="empty-state"><div>Chưa có lịch sử</div></div>';
+  document.getElementById("adminHistoryBrowser").innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><div>Chọn một tài khoản để xem lịch sử</div></div>';
+}
+
+function setAdminHistoryMedia(mediaType) {
+  adminHistoryMedia = mediaType;
+  loadAdminHistoryUsers();
+}
+
+async function openAdminHistoryUser(userId, username) {
+  adminHistoryState = { userId, username, jobId: null, batchName: "", fileName: null };
+  document.getElementById("adminHistoryTitle").textContent = `Lịch sử của ${username}`;
+  document.getElementById("adminHistoryDesc").textContent = "Chọn batch để đi sâu hơn vào từng thư mục file.";
+  const qs = `user_id=${userId}${adminHistoryMedia ? `&media_type=${adminHistoryMedia}` : ""}`;
+  const res = await apiFetch(`/admin/history/groups?${qs}`);
+  if (!res.ok) return;
+  const items = await res.json();
+  document.getElementById("adminHistoryBack").style.display = "";
+  renderAdminHistoryFolders(items, g => g.batch_name || g.job_id, g => `${g.count} mục`, item => openAdminHistoryGroup(item.job_id, item.batch_name || item.job_id));
+}
+
+async function openAdminHistoryGroup(jobId, batchName) {
+  adminHistoryState.jobId = jobId;
+  adminHistoryState.batchName = batchName;
+  document.getElementById("adminHistoryTitle").textContent = batchName;
+  document.getElementById("adminHistoryDesc").textContent = "Chọn file để xem ảnh/video bên trong.";
+  const qs = `user_id=${adminHistoryState.userId}&job_id=${encodeURIComponent(jobId)}${adminHistoryMedia ? `&media_type=${adminHistoryMedia}` : ""}`;
+  const res = await apiFetch(`/admin/history/subgroups?${qs}`);
+  if (!res.ok) return;
+  const items = await res.json();
+  if (items.length <= 1) return openAdminHistoryFile(items[0]?.file_name || "");
+  renderAdminHistoryFolders(items, f => f.file_name || "Không chia file", f => `${f.count} mục`, item => openAdminHistoryFile(item.file_name || ""));
+}
+
+async function openAdminHistoryFile(fileName) {
+  adminHistoryState.fileName = fileName;
+  document.getElementById("adminHistoryTitle").textContent = fileName || adminHistoryState.batchName;
+  document.getElementById("adminHistoryDesc").textContent = "Nội dung bên trong thư mục đã chọn.";
+  const params = new URLSearchParams({
+    user_id: String(adminHistoryState.userId),
+    job_id: adminHistoryState.jobId,
+    file_name: fileName || "",
+    limit: "200",
+  });
+  if (adminHistoryMedia) params.set("media_type", adminHistoryMedia);
+  const res = await apiFetch(`/admin/history/items?${params.toString()}`);
+  if (!res.ok) return;
+  const items = await res.json();
+  renderAdminHistoryItems(items);
+}
+
+function adminHistoryBack() {
+  if (adminHistoryState.fileName !== null) {
+    adminHistoryState.fileName = null;
+    openAdminHistoryGroup(adminHistoryState.jobId, adminHistoryState.batchName);
+    return;
+  }
+  if (adminHistoryState.jobId) {
+    openAdminHistoryUser(adminHistoryState.userId, adminHistoryState.username);
+    adminHistoryState.jobId = null;
+    adminHistoryState.batchName = "";
+    return;
+  }
+  loadAdminHistoryUsers();
+}
+
+function renderAdminHistoryFolders(items, getName, getMeta, onClick) {
+  const box = document.getElementById("adminHistoryBrowser");
+  box.classList.remove("grid-mode");
+  box.innerHTML = items.map(item => `
+    <div class="hist-folder" onclick="${''}">
+      <div class="hist-folder-info">
+        <div class="hist-folder-name">${esc(getName(item))}</div>
+        <div class="hist-folder-meta">${esc(getMeta(item))}</div>
+      </div>
+    </div>`).join("");
+  [...box.children].forEach((el, idx) => { el.onclick = () => onClick(items[idx]); });
+  if (!items.length) box.innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><div>Không có dữ liệu</div></div>';
+}
+
+function renderAdminHistoryItems(items) {
+  const grid = document.getElementById("adminHistoryBrowser");
+  grid.classList.add("grid-mode");
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><div>Không có dữ liệu</div></div>';
+    return;
+  }
+  grid.innerHTML = "";
+  items.forEach(item => {
+    const mediaUrl = item.media_url || item.image_url;
+    const card = document.createElement("div");
+    card.className = "img-card";
+    const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+    if (item.media_type === "video") {
+      card.innerHTML = `<div class="video-history-preview" onclick="window.open('${mediaUrl}','_blank')"><div class="video-history-play">▶</div><div class="video-history-label">Xem video</div></div>
+      <div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model || "")} · ${time}</div></div>`;
+    } else {
+      card.innerHTML = `<img src="${mediaUrl}" loading="lazy"/><div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${esc(item.model || "")} · ${time}</div></div>`;
+    }
+    grid.appendChild(card);
+  });
 }
 // ── UI Helpers ────────────────────────────────────────────────────────────────
 function setLoading(on) {

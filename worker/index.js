@@ -27,7 +27,13 @@ export default {
     if (path === "/admin/users" && request.method === "POST") return adminCreateUser(request, env);
     if (path.startsWith("/admin/users/") && request.method === "PUT") return adminUpdateUser(request, env, path);
     if (path.startsWith("/admin/users/") && request.method === "DELETE") return adminDeleteUser(request, env, path);
+    if (path === "/admin/history/users" && request.method === "GET") return adminGetHistoryUsers(request, env, url);
+    if (path === "/admin/history/groups" && request.method === "GET") return adminGetHistoryGroups(request, env, url);
+    if (path === "/admin/history/subgroups" && request.method === "GET") return adminGetHistorySubgroups(request, env, url);
+    if (path === "/admin/history/items" && request.method === "GET") return adminGetHistoryItems(request, env, url);
     if (path === "/admin/history" && request.method === "GET") return adminGetHistory(request, env, url);
+    if (path === "/admin/cookies" && request.method === "GET") return adminGetCookies(request, env, url);
+    if (path.startsWith("/admin/cookies/") && request.method === "DELETE") return adminDeleteCookie(request, env, path);
 
     // ── User cookie routes ──
     if (path === "/user/cookies" && request.method === "GET") return getUserCookies(request, env);
@@ -330,6 +336,125 @@ async function adminGetHistory(request, env, url) {
     "SELECT h.*, u.username FROM gen_history h JOIN users u ON h.user_id=u.id ORDER BY h.id DESC LIMIT ? OFFSET ?"
   ).bind(limit, offset).all();
   return json(results);
+}
+
+async function adminGetHistoryUsers(request, env, url) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  await ensureHistorySchema(env);
+  const mediaType = url.searchParams.get("media_type");
+  const limit = parseInt(url.searchParams.get("limit") || "100");
+  const offset = parseInt(url.searchParams.get("offset") || "0");
+  const query = mediaType
+    ? `SELECT u.id as user_id, u.username, COUNT(*) as count, MAX(h.created_at) as created_at
+       FROM gen_history h JOIN users u ON h.user_id=u.id
+       WHERE COALESCE(h.media_type,'image')=? AND COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!=''
+       GROUP BY u.id, u.username ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`
+    : `SELECT u.id as user_id, u.username, COUNT(*) as count, MAX(h.created_at) as created_at
+       FROM gen_history h JOIN users u ON h.user_id=u.id
+       WHERE COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!=''
+       GROUP BY u.id, u.username ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`;
+  const stmt = env.DB.prepare(query);
+  const { results } = mediaType ? await stmt.bind(mediaType, limit, offset).all() : await stmt.bind(limit, offset).all();
+  return json(results);
+}
+
+async function adminGetHistoryGroups(request, env, url) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  await ensureHistorySchema(env);
+  const userId = parseInt(url.searchParams.get("user_id") || "0");
+  const mediaType = url.searchParams.get("media_type");
+  if (!userId) return err("Missing user_id");
+  const query = mediaType
+    ? `SELECT job_id, COALESCE(batch_name,'') as batch_name, model, COUNT(*) as count, MAX(created_at) as created_at
+       FROM gen_history WHERE user_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
+       GROUP BY job_id ORDER BY MAX(id) DESC`
+    : `SELECT job_id, COALESCE(batch_name,'') as batch_name, model, COUNT(*) as count, MAX(created_at) as created_at
+       FROM gen_history WHERE user_id=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
+       GROUP BY job_id ORDER BY MAX(id) DESC`;
+  const stmt = env.DB.prepare(query);
+  const { results } = mediaType ? await stmt.bind(userId, mediaType).all() : await stmt.bind(userId).all();
+  return json(results);
+}
+
+async function adminGetHistorySubgroups(request, env, url) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  await ensureHistorySchema(env);
+  const userId = parseInt(url.searchParams.get("user_id") || "0");
+  const jobId = url.searchParams.get("job_id");
+  const mediaType = url.searchParams.get("media_type");
+  if (!userId || !jobId) return err("Missing user_id or job_id");
+  const query = mediaType
+    ? `SELECT COALESCE(file_name,'') as file_name, COUNT(*) as count, MAX(created_at) as created_at
+       FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(media_type,'image')=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
+       GROUP BY file_name ORDER BY MIN(id)`
+    : `SELECT COALESCE(file_name,'') as file_name, COUNT(*) as count, MAX(created_at) as created_at
+       FROM gen_history WHERE user_id=? AND job_id=? AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!=''
+       GROUP BY file_name ORDER BY MIN(id)`;
+  const stmt = env.DB.prepare(query);
+  const { results } = mediaType ? await stmt.bind(userId, jobId, mediaType).all() : await stmt.bind(userId, jobId).all();
+  return json(results);
+}
+
+async function adminGetHistoryItems(request, env, url) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  await ensureHistorySchema(env);
+  const userId = parseInt(url.searchParams.get("user_id") || "0");
+  const jobId = url.searchParams.get("job_id");
+  const fileName = url.searchParams.get("file_name");
+  const mediaType = url.searchParams.get("media_type");
+  const limit = parseInt(url.searchParams.get("limit") || "100");
+  const offset = parseInt(url.searchParams.get("offset") || "0");
+  if (!userId) return err("Missing user_id");
+  let sql = "SELECT id,job_id,prompt,model,image_url,COALESCE(media_url,image_url) as media_url,COALESCE(media_type,'image') as media_type,error,created_at FROM gen_history WHERE user_id=?";
+  const vals = [userId];
+  if (jobId) { sql += " AND job_id=?"; vals.push(jobId); }
+  if (fileName !== null) { sql += " AND COALESCE(file_name,'')=?"; vals.push(fileName || ""); }
+  if (mediaType) { sql += " AND COALESCE(media_type,'image')=?"; vals.push(mediaType); }
+  sql += " AND COALESCE(media_url,image_url) IS NOT NULL AND COALESCE(media_url,image_url)!='' ORDER BY id DESC LIMIT ? OFFSET ?";
+  vals.push(limit, offset);
+  const { results } = await env.DB.prepare(sql).bind(...vals).all();
+  return json(results);
+}
+
+async function adminGetCookies(request, env, url) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  const userId = parseInt(url.searchParams.get("user_id") || "0");
+  const group = url.searchParams.get("group");
+  if (group === "users") {
+    const { results } = await env.DB.prepare(
+      `SELECT u.id as user_id, u.username, COUNT(c.id) as count, MAX(c.created_at) as created_at
+       FROM users u LEFT JOIN user_cookies c ON u.id=c.user_id
+       GROUP BY u.id, u.username ORDER BY MAX(c.id) DESC, u.id`
+    ).all();
+    return json(results);
+  }
+  if (userId) {
+    const { results } = await env.DB.prepare(
+      `SELECT c.id, c.cookie_hash, c.email, c.status, c.created_at, u.id as user_id, u.username
+       FROM user_cookies c JOIN users u ON c.user_id=u.id
+       WHERE c.user_id=? ORDER BY c.id DESC`
+    ).bind(userId).all();
+    return json(results);
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT c.id, c.cookie_hash, c.email, c.status, c.created_at, u.id as user_id, u.username
+     FROM user_cookies c JOIN users u ON c.user_id=u.id
+     ORDER BY c.id DESC LIMIT 200`
+  ).all();
+  return json(results);
+}
+
+async function adminDeleteCookie(request, env, path) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  const id = parseInt(path.split("/").pop());
+  await env.DB.prepare("DELETE FROM user_cookies WHERE id=?").bind(id).run();
+  return json({ ok: true });
 }
 
 // ── User Cookies ─────────────────────────────────────────────────────────────

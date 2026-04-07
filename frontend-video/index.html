@@ -203,10 +203,11 @@
           <div class="admin-sidebar-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị video...</div>
         </div>
         <div class="admin-sidebar-nav">
-          <button class="admin-side-link active">Tổng quan</button>
-          <button class="admin-side-link">Người dùng</button>
-          <button class="admin-side-link">Gói dịch vụ</button>
-          <button class="admin-side-link">Lịch sử hệ thống</button>
+          <button class="admin-side-link active" id="adminNavOverview" onclick="switchAdminSection('overview')">Tổng quan</button>
+          <button class="admin-side-link" id="adminNavUsers" onclick="switchAdminSection('users')">Người dùng</button>
+          <button class="admin-side-link" id="adminNavPlans" onclick="switchAdminSection('plans')">Gói dịch vụ</button>
+          <button class="admin-side-link" id="adminNavCookies" onclick="switchAdminSection('cookies')">Kho cookie</button>
+          <button class="admin-side-link" id="adminNavHistory" onclick="switchAdminSection('history')">Lịch sử hệ thống</button>
         </div>
         <div class="admin-summary-list" id="adminSummaryList">
           <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
@@ -214,78 +215,165 @@
       </aside>
 
       <div class="admin-content">
-        <section class="admin-stats" id="adminStats">
-          <article class="admin-stat-card">
-            <span class="admin-stat-label">Tổng tài khoản</span>
-            <strong class="admin-stat-value" id="adminStatUsers">0</strong>
-            <span class="admin-stat-note">Toàn bộ tài khoản đang có trong hệ thống</span>
-          </article>
-          <article class="admin-stat-card">
-            <span class="admin-stat-label">Gói đang hoạt động</span>
-            <strong class="admin-stat-value" id="adminStatPlans">0</strong>
-            <span class="admin-stat-note">Bao gồm tài khoản còn hạn và không giới hạn</span>
-          </article>
-          <article class="admin-stat-card">
-            <span class="admin-stat-label">Tài khoản bị khóa</span>
-            <strong class="admin-stat-value" id="adminStatLocked">0</strong>
-            <span class="admin-stat-note">Cần kiểm tra hoặc mở lại khi cần thiết</span>
-          </article>
-          <article class="admin-stat-card">
-            <span class="admin-stat-label">Lượt tạo gần đây</span>
-            <strong class="admin-stat-value" id="adminStatHistory">0</strong>
-            <span class="admin-stat-note">Số bản ghi đang hiển thị trong khu lịch sử</span>
-          </article>
+        <section class="admin-pane" id="adminPaneOverview">
+          <section class="admin-stats" id="adminStats">
+            <article class="admin-stat-card">
+              <span class="admin-stat-label">Tổng tài khoản</span>
+              <strong class="admin-stat-value" id="adminStatUsers">0</strong>
+              <span class="admin-stat-note">Toàn bộ tài khoản đang có trong hệ thống</span>
+            </article>
+            <article class="admin-stat-card">
+              <span class="admin-stat-label">Gói đang hoạt động</span>
+              <strong class="admin-stat-value" id="adminStatPlans">0</strong>
+              <span class="admin-stat-note">Bao gồm tài khoản còn hạn và không giới hạn</span>
+            </article>
+            <article class="admin-stat-card">
+              <span class="admin-stat-label">Tài khoản bị khóa</span>
+              <strong class="admin-stat-value" id="adminStatLocked">0</strong>
+              <span class="admin-stat-note">Cần kiểm tra hoặc mở lại khi cần thiết</span>
+            </article>
+            <article class="admin-stat-card">
+              <span class="admin-stat-label">Lượt tạo gần đây</span>
+              <strong class="admin-stat-value" id="adminStatHistory">0</strong>
+              <span class="admin-stat-note">Số bản ghi đang hiển thị trong khu lịch sử</span>
+            </article>
+          </section>
+          <section class="admin-section admin-history-section">
+            <div class="admin-section-head">
+              <div>
+                <h3>Lịch sử toàn hệ thống</h3>
+                <p>Theo dõi các lượt tạo gần đây của cả hai hệ để kiểm tra hoạt động và chất lượng vận hành.</p>
+              </div>
+            </div>
+            <div id="adminHistoryGrid" class="results-grid admin-history-grid">
+              <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+            </div>
+          </section>
         </section>
 
-        <section class="admin-layout">
-          <div class="admin-main">
-            <div class="admin-section">
-              <div class="admin-section-head">
-                <div>
-                  <h3>Người dùng và gói dịch vụ</h3>
-                  <p>Theo dõi vai trò, trạng thái tài khoản và thời hạn gói trong một bảng duy nhất.</p>
+        <section class="admin-pane" id="adminPaneUsers" style="display:none">
+          <section class="admin-layout">
+            <div class="admin-main">
+              <div class="admin-section">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Người dùng và vai trò</h3>
+                    <p>Theo dõi vai trò, trạng thái tài khoản và thời hạn gói trong một bảng duy nhất.</p>
+                  </div>
+                  <div class="admin-inline-note">Tài khoản `adminveo` được khóa chỉnh sửa.</div>
                 </div>
-                <div class="admin-inline-note">Tài khoản `adminveo` được khóa chỉnh sửa.</div>
-              </div>
-              <div class="admin-table-wrap">
-                <table class="cookie-table admin-user-table" id="adminUserTable">
-                  <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-                  <tbody id="adminUserBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          <aside class="admin-side">
-            <div class="admin-section admin-section-tight">
-              <div class="admin-section-head">
-                <div>
-                  <h3>Tạo tài khoản mới</h3>
-                  <p>Thêm nhanh tài khoản mới và gán vai trò ngay trong trang quản trị.</p>
+                <div class="admin-table-wrap">
+                  <table class="cookie-table admin-user-table" id="adminUserTable">
+                    <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+                    <tbody id="adminUserBody"></tbody>
+                  </table>
                 </div>
               </div>
-              <div class="admin-form">
-                <input type="text" id="adminNewUser" placeholder="Tên đăng nhập"/>
-                <input type="password" id="adminNewPass" placeholder="Mật khẩu"/>
-                <select id="adminNewRole">
-                  <option value="user">Người dùng</option>
-                  <option value="admin">Quản trị viên</option>
-                </select>
-                <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
-              </div>
             </div>
-          </aside>
+            <aside class="admin-side">
+              <div class="admin-section admin-section-tight">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Tạo tài khoản mới</h3>
+                    <p>Thêm nhanh tài khoản mới và gán vai trò ngay trong trang quản trị.</p>
+                  </div>
+                </div>
+                <div class="admin-form">
+                  <input type="text" id="adminNewUser" placeholder="Tên đăng nhập"/>
+                  <input type="password" id="adminNewPass" placeholder="Mật khẩu"/>
+                  <select id="adminNewRole">
+                    <option value="user">Người dùng</option>
+                    <option value="admin">Quản trị viên</option>
+                  </select>
+                  <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
+                </div>
+              </div>
+            </aside>
+          </section>
         </section>
 
-        <section class="admin-section admin-history-section">
-          <div class="admin-section-head">
-            <div>
-              <h3>Lịch sử toàn hệ thống</h3>
-              <p>Theo dõi các lượt tạo gần đây của cả hai hệ để kiểm tra hoạt động và chất lượng vận hành.</p>
+        <section class="admin-pane" id="adminPanePlans" style="display:none">
+          <section class="admin-section">
+            <div class="admin-section-head">
+              <div>
+                <h3>Quản lý gói dịch vụ</h3>
+                <p>Gia hạn hoặc hủy gói theo từng tài khoản ngay trong một bảng riêng.</p>
+              </div>
             </div>
-          </div>
-          <div id="adminHistoryGrid" class="results-grid admin-history-grid">
-            <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
-          </div>
+            <div class="admin-table-wrap">
+              <table class="cookie-table admin-user-table">
+                <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Trạng thái gói</th><th>Gia hạn nhanh</th></tr></thead>
+                <tbody id="adminPlanBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="admin-pane" id="adminPaneCookies" style="display:none">
+          <section class="admin-layout">
+            <aside class="admin-side">
+              <div class="admin-section admin-section-tight">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Tài khoản có cookie</h3>
+                    <p>Chọn từng tài khoản để xem riêng kho cookie của họ.</p>
+                  </div>
+                </div>
+                <div id="adminCookieUsers" class="admin-folder-list"></div>
+              </div>
+            </aside>
+            <div class="admin-main">
+              <div class="admin-section">
+                <div class="admin-section-head">
+                  <div>
+                    <h3 id="adminCookieTitle">Kho cookie theo tài khoản</h3>
+                    <p>Toàn bộ cookie đang được lưu trong hệ thống, tách riêng theo người dùng.</p>
+                  </div>
+                </div>
+                <div class="admin-table-wrap">
+                  <table class="cookie-table admin-user-table">
+                    <thead><tr><th>ID</th><th>Tài khoản</th><th>Mã cookie</th><th>Email</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead>
+                    <tbody id="adminCookieBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="admin-pane" id="adminPaneHistory" style="display:none">
+          <section class="admin-layout">
+            <aside class="admin-side">
+              <div class="admin-section admin-section-tight">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Lịch sử theo tài khoản</h3>
+                    <p>Mỗi tài khoản là một thư mục riêng, sau đó đi tiếp vào batch và file.</p>
+                  </div>
+                </div>
+                <div class="admin-filter-row">
+                  <button class="btn btn-ghost" onclick="setAdminHistoryMedia('')">Tất cả</button>
+                  <button class="btn btn-ghost" onclick="setAdminHistoryMedia('image')">Ảnh</button>
+                  <button class="btn btn-ghost" onclick="setAdminHistoryMedia('video')">Video</button>
+                </div>
+                <div id="adminHistoryFolders" class="admin-folder-list"></div>
+              </div>
+            </aside>
+            <div class="admin-main">
+              <div class="admin-section">
+                <div class="admin-section-head">
+                  <div>
+                    <h3 id="adminHistoryTitle">Lịch sử toàn hệ thống</h3>
+                    <p id="adminHistoryDesc">Chọn một tài khoản bên trái để mở theo cây thư mục.</p>
+                  </div>
+                  <button class="btn btn-ghost" id="adminHistoryBack" onclick="adminHistoryBack()" style="display:none">Quay lại</button>
+                </div>
+                <div id="adminHistoryBrowser" class="results-grid admin-history-grid">
+                  <div class="empty-state"><div class="empty-icon">📁</div><div>Chọn một tài khoản để xem lịch sử</div></div>
+                </div>
+              </div>
+            </div>
+          </section>
         </section>
       </div>
     </div>
