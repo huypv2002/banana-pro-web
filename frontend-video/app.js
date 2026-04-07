@@ -511,7 +511,7 @@ function populateResultsTable() {
   let html = "", idx = 0;
   batchFiles.forEach(f => {
     const strip = n => n.replace(/\.txt$/i, "");
-    const cols = 3 + (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
+    const cols = 4 + (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
     html += `<tr class="file-separator"><td colspan="${cols}">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
     f.prompts.forEach(text => {
       const refCell = hasRef
