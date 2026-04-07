@@ -40,28 +40,57 @@ def _cleanup_upscaled():
 
 PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
 
-def get_active_profile():
-    """Get first active profile from PROFILES_DIR, fallback to CHROME_PROFILE_PATH."""
+def get_all_profiles() -> list:
+    """Get all profiles with cookies, sorted by name."""
     d = Path(PROFILES_DIR)
-    if d.is_dir():
-        for p in sorted(d.iterdir()):
-            if p.is_dir() and not p.name.startswith("."):
-                cookies = p / "Default" / "Network" / "Cookies"
-                if cookies.exists() and cookies.stat().st_size > 0:
-                    return str(p)
-    return os.environ.get("CHROME_PROFILE_PATH")
+    if not d.is_dir():
+        fb = os.environ.get("CHROME_PROFILE_PATH")
+        return [fb] if fb else []
+    profiles = []
+    for p in sorted(d.iterdir()):
+        if p.is_dir() and not p.name.startswith("."):
+            cookies = p / "Default" / "Network" / "Cookies"
+            if cookies.exists() and cookies.stat().st_size > 0:
+                profiles.append(str(p))
+    return profiles
+
+def get_active_profile() -> str:
+    """Get first active profile (backward compat)."""
+    profiles = get_all_profiles()
+    return profiles[0] if profiles else None
+
+def get_client_with_fallback(cookies_dict: dict):
+    """Tạo LabsFlowClient, thử từng profile cho đến khi fetch_access_token thành công."""
+    profiles = get_all_profiles()
+    if not profiles:
+        profiles = [None]
+    last_err = ""
+    for profile in profiles:
+        try:
+            client = LabsFlowClient(cookies_dict, profile_path=profile)
+            if client.fetch_access_token():
+                logger.info(f"[Profile] Using: {Path(profile).name if profile else 'default'}")
+                return client
+            last_err = client.last_error_detail or "fetch_access_token failed"
+            logger.warning(f"[Profile] {Path(profile).name if profile else 'default'} failed: {last_err}")
+        except Exception as e:
+            last_err = str(e)
+            logger.warning(f"[Profile] {profile} error: {e}")
+    raise ValueError(f"Tất cả profiles đều thất bại. Lỗi cuối: {last_err}")
 
 @app.on_event("startup")
 def startup_event():
-    """Pre-warm Chrome CDP on startup."""
-    profile = get_active_profile()
-    if profile:
-        logger.info(f"Pre-warming Chrome CDP with profile: {profile}")
+    """Pre-warm Chrome CDP on all profiles."""
+    profiles = get_all_profiles()
+    if not profiles:
+        return
+    logger.info(f"Pre-warming Chrome CDP with {len(profiles)} profile(s): {[Path(p).name for p in profiles]}")
+    for profile in profiles:
         try:
             LabsFlowClient._ensure_zendriver_worker(profile_path=profile)
-            logger.info("Chrome CDP ready.")
+            logger.info(f"Chrome CDP ready: {Path(profile).name}")
         except Exception as e:
-            logger.warning(f"Chrome CDP pre-warm failed: {e}")
+            logger.warning(f"Chrome CDP pre-warm failed ({Path(profile).name}): {e}")
 
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
@@ -137,10 +166,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
         if not cookies:
             raise ValueError("Cookie không hợp lệ.")
 
-        client = LabsFlowClient(cookies, profile_path=get_active_profile())
-        if not client.fetch_access_token():
-            raise ValueError("Không thể lấy access token. Cookie có thể đã hết hạn.")
-
+        client = get_client_with_fallback(cookies)
         project_id = client.flow_project_id
         aspect = ASPECT_MAP.get(aspect_ratio, "IMAGE_ASPECT_RATIO_LANDSCAPE")
 
@@ -611,9 +637,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         cookies = _parse_cookie_input(cookie)
         if not cookies:
             raise ValueError("Cookie không hợp lệ.")
-        client = LabsFlowClient(cookies, profile_path=get_active_profile())
-        if not client.fetch_access_token():
-            raise ValueError("Không thể lấy access token.")
+        client = get_client_with_fallback(cookies)
         project_id = client.flow_project_id
         upload_cache = {}
 
@@ -622,9 +646,6 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             if job.get("cancelled"):
                 return {"prompt": prompt, "urls": [], "error": "Cancelled"}
             try:
-                # Re-fetch token trước mỗi prompt để tránh token hết hạn giữa chừng
-                if not client.fetch_access_token():
-                    return {"prompt": prompt, "urls": [], "error": "Token hết hạn, vui lòng lấy cookie mới"}
                 ref_raw = ref_images.get(str(idx))
                 ref_b64_list = ref_raw if isinstance(ref_raw, list) else ([ref_raw] if ref_raw else [])
                 ref_b64 = ref_b64_list[0] if ref_b64_list else None
