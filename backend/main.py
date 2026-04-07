@@ -618,6 +618,9 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             if job.get("cancelled"):
                 return {"prompt": prompt, "urls": [], "error": "Cancelled"}
             try:
+                # Re-fetch token trước mỗi prompt để tránh token hết hạn giữa chừng
+                if not client.fetch_access_token():
+                    return {"prompt": prompt, "urls": [], "error": "Token hết hạn, vui lòng lấy cookie mới"}
                 ref_raw = ref_images.get(str(idx))
                 ref_b64_list = ref_raw if isinstance(ref_raw, list) else ([ref_raw] if ref_raw else [])
                 ref_b64 = ref_b64_list[0] if ref_b64_list else None
