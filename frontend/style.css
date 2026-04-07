@@ -10,6 +10,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 /* Header */
 .header { background: #fff; border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: var(--shadow); position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 10px; }
+.header-right { display:flex; align-items:center; gap:8px; }
 .logo { font-size: 1.6rem; }
 .app-name { font-size: 1.1rem; font-weight: 700; }
 .user-info { font-size: 0.8rem; color: var(--muted); margin-right: 8px; }
@@ -137,6 +138,8 @@ textarea { resize: vertical; }
 @media (max-width: 768px) {
   .main-layout { grid-template-columns: 1fr; height: auto; }
   .left-panel, .right-panel { height: auto; }
+  .header { flex-wrap:wrap; gap:10px; }
+  .header-right { width:100%; justify-content:flex-end; flex-wrap:wrap; }
 }
 
 /* ── Login Screen ──────────────────────────────────────────────────────────── */

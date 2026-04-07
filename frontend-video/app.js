@@ -128,6 +128,7 @@ function showApp() {
   if (["admin", "super_admin"].includes(authUser.role)) { planEl.textContent = "♾ Unlimited"; planEl.className = "plan-badge plan-active"; }
   else if (authUser.plan_active) { const days = Math.ceil((new Date(authUser.plan_expires_at) - new Date()) / 86400000); planEl.textContent = `📦 Còn ${days} ngày`; planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active"); }
   else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
+  document.getElementById("navAdmin").style.display = ["admin", "super_admin"].includes(authUser.role) ? "" : "none";
   loadCookiesFromDB();
   showTab("generate");
 }
@@ -158,9 +159,12 @@ async function handleAuth(e) {
 function showTab(tab) {
   document.getElementById("tabGenerate").style.display = tab === "generate" ? "" : "none";
   document.getElementById("tabHistory").style.display = tab === "history" ? "" : "none";
+  document.getElementById("tabAdmin").style.display = tab === "admin" ? "" : "none";
   document.getElementById("navGenerate").classList.toggle("active", tab === "generate");
   document.getElementById("navHistory").classList.toggle("active", tab === "history");
+  document.getElementById("navAdmin").classList.toggle("active", tab === "admin");
   if (tab === "history") loadHistory();
+  if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { loadAdminUsers(); loadAdminHistory(); }
 }
 
 // ── Video Mode ──
@@ -923,3 +927,119 @@ async function historyDownloadZip(urls, btnId) {
 
 function historyDownloadAll() { historyDownloadZip(getHistoryUrls(false), "histDlAll"); }
 function historyDownloadSelected() { historyDownloadZip(getHistoryUrls(true), "histDlSel"); }
+
+async function loadAdminUsers() {
+  try {
+    const res = await apiFetch("/admin/users");
+    if (!res.ok) return;
+    const users = await res.json();
+    const now = new Date().toISOString();
+    updateAdminDashboard(users);
+    const tbody = document.getElementById("adminUserBody");
+    tbody.innerHTML = users.map(u => {
+      const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
+      const planText = ["admin", "super_admin"].includes(u.role) ? "♾ Unlimited" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planClass = planActive ? "status-ok" : "status-err";
+      return `<tr>
+      <td>${u.id}</td><td>${esc(u.username)}</td>
+      <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "adminveo" ? "disabled" : ""}>
+        <option value="user" ${u.role === "user" ? "selected" : ""}>User</option>
+        <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+        <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Super Admin</option>
+      </select></td>
+      <td><span class="${planClass}">${planText}</span>
+        ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},90)">+90d</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem;color:var(--error)" onclick="adminSetPlan(${u.id},0)">Hủy</button>
+        </div>` : ""}
+      </td>
+      <td>${u.disabled ? '<span class="status-err">Khóa</span>' : '<span class="status-ok">OK</span>'}</td>
+      <td>
+        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓" : "🔒"}</button>
+        ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">🗑</button>` : ""}
+      </td>
+    </tr>`;
+    }).join("");
+  } catch (e) {}
+}
+
+function updateAdminDashboard(users) {
+  const now = new Date().toISOString();
+  const totalUsers = users.length;
+  const activePlans = users.filter(u => ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now)).length;
+  const lockedUsers = users.filter(u => !!u.disabled).length;
+  const admins = users.filter(u => ["admin", "super_admin"].includes(u.role)).length;
+  const expiringSoon = users.filter(u => {
+    if (!u.plan_expires_at || ["admin", "super_admin"].includes(u.role)) return false;
+    const diff = new Date(u.plan_expires_at) - new Date();
+    return diff > 0 && diff <= 3 * 86400000;
+  }).length;
+
+  document.getElementById("adminStatUsers").textContent = String(totalUsers);
+  document.getElementById("adminStatPlans").textContent = String(activePlans);
+  document.getElementById("adminStatLocked").textContent = String(lockedUsers);
+  document.getElementById("adminWorkspaceMeta").textContent = `${admins} tài khoản quản trị, ${expiringSoon} gói sắp hết hạn và ${lockedUsers} tài khoản đang bị khóa.`;
+
+  const summary = document.getElementById("adminSummaryList");
+  const items = [
+    { label: "Tài khoản quản trị", value: `${admins} tài khoản`, note: "Bao gồm admin và super admin đang có quyền điều hành." },
+    { label: "Gói sắp hết hạn", value: `${expiringSoon} user`, note: "Ưu tiên gia hạn để tránh gián đoạn khi user gen video." },
+    { label: "Tài khoản bị khóa", value: `${lockedUsers} user`, note: lockedUsers ? "Nên rà soát lý do khóa hoặc mở lại nếu cần." : "Hiện chưa có tài khoản nào bị khóa." },
+  ];
+  summary.innerHTML = items.map(item => `<div class="admin-summary-item"><strong>${item.label}</strong><span>${item.value}<br>${item.note}</span></div>`).join("");
+}
+
+async function adminAddUser() {
+  const username = document.getElementById("adminNewUser").value.trim();
+  const password = document.getElementById("adminNewPass").value;
+  const role = document.getElementById("adminNewRole").value;
+  if (!username || !password) { sAlert("Thiếu username/password"); return; }
+  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role }) });
+  const data = await res.json();
+  if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
+  document.getElementById("adminNewUser").value = "";
+  document.getElementById("adminNewPass").value = "";
+  loadAdminUsers();
+}
+
+async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
+async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
+async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminSetPlan(id, days) {
+  if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  loadAdminUsers();
+}
+
+async function loadAdminHistory() {
+  try {
+    const res = await apiFetch("/admin/history?limit=50");
+    if (!res.ok) return;
+    const items = await res.json();
+    document.getElementById("adminStatHistory").textContent = String(items.length);
+    const grid = document.getElementById("adminHistoryGrid");
+    grid.innerHTML = "";
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>';
+      return;
+    }
+    items.forEach(item => {
+      const card = document.createElement("div");
+      card.className = "img-card";
+      const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+      const mediaUrl = item.media_url || item.video_url || item.image_url;
+      if (mediaUrl) {
+        const mediaBlock = item.media_type === "video"
+          ? `<div class="video-history-preview" onclick="openHistoryVideo('${esc(mediaUrl)}')"><div class="video-history-play">▶</div><div class="video-history-label">Xem video</div></div>`
+          : `<img src="${mediaUrl}" loading="lazy" onerror="this.style.display='none'"/>`;
+        card.innerHTML = `${mediaBlock}
+          <div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">👤 ${esc(item.username)} · ${esc(item.model || "")} · ${time}</div></div>`;
+      } else {
+        card.innerHTML = `<div class="img-card-error">❌ ${esc(item.error || "Thất bại")}</div><div class="img-card-body"><div class="img-card-prompt">${esc(item.prompt)}</div><div style="font-size:0.68rem;color:var(--muted);margin-top:4px">👤 ${esc(item.username)} · ${time}</div></div>`;
+      }
+      grid.appendChild(card);
+    });
+  } catch (e) {}
+}

@@ -39,8 +39,10 @@
   <nav class="header-nav">
     <button class="nav-btn active" onclick="showTab('generate')" id="navGenerate">🎬 Tạo video</button>
     <button class="nav-btn" onclick="showTab('history')" id="navHistory">📜 Lịch sử</button>
+    <button class="nav-btn" onclick="showTab('admin')" id="navAdmin" style="display:none">👑 Admin</button>
   </nav>
-  <div style="display:flex;align-items:center;gap:8px">
+  <div class="header-right">
+    <a class="btn btn-outline" href="https://banana-pro-web.pages.dev/">🍌 Ảnh</a>
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
     <button class="btn btn-outline" onclick="openCookieModal()">🍪 Cookie</button>
@@ -186,6 +188,108 @@
       <span id="historyPageInfo" style="font-size:0.82rem;color:var(--muted)">Trang 1</span>
       <button class="btn btn-ghost" id="historyNext" onclick="historyNextPage()" disabled>Sau →</button>
     </div>
+  </div>
+</div>
+
+<div id="tabAdmin" class="tab-content" style="display:none">
+  <div class="admin-container">
+    <section class="admin-hero">
+      <div class="admin-hero-copy">
+        <span class="admin-kicker">Super Admin Workspace</span>
+        <h2>Điều hành user, gói và lịch sử video từ một dashboard tập trung</h2>
+        <p>Giao diện quản trị của Banana Pro Video được đồng bộ cùng tinh thần với trang image, nhưng ưu tiên thêm góc nhìn theo batch, file và luồng gen video gần đây.</p>
+      </div>
+      <div class="admin-hero-panel">
+        <div class="admin-hero-badge">👑 Super Admin</div>
+        <div class="admin-hero-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị video...</div>
+      </div>
+    </section>
+
+    <section class="admin-stats" id="adminStats">
+      <article class="admin-stat-card">
+        <span class="admin-stat-label">Tổng user</span>
+        <strong class="admin-stat-value" id="adminStatUsers">0</strong>
+        <span class="admin-stat-note">Tài khoản hiện có trong hệ thống</span>
+      </article>
+      <article class="admin-stat-card">
+        <span class="admin-stat-label">Gói hoạt động</span>
+        <strong class="admin-stat-value" id="adminStatPlans">0</strong>
+        <span class="admin-stat-note">User còn hạn hoặc có quyền vô hạn</span>
+      </article>
+      <article class="admin-stat-card">
+        <span class="admin-stat-label">Tài khoản bị khóa</span>
+        <strong class="admin-stat-value" id="adminStatLocked">0</strong>
+        <span class="admin-stat-note">Cần rà soát hoặc mở khóa thủ công</span>
+      </article>
+      <article class="admin-stat-card">
+        <span class="admin-stat-label">Lượt gen gần đây</span>
+        <strong class="admin-stat-value" id="adminStatHistory">0</strong>
+        <span class="admin-stat-note">Mẫu video gần nhất đang hiển thị bên dưới</span>
+      </article>
+    </section>
+
+    <section class="admin-layout">
+      <div class="admin-main">
+        <div class="admin-section">
+          <div class="admin-section-head">
+            <div>
+              <h3>Người dùng & gói</h3>
+              <p>Quản lý role, khóa tài khoản và gia hạn gói ngay trên cùng một bảng điều hành.</p>
+            </div>
+            <div class="admin-inline-note">User `adminveo` được khóa chỉnh sửa vì là super admin gốc.</div>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="cookie-table admin-user-table" id="adminUserTable">
+              <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Gói</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
+              <tbody id="adminUserBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <aside class="admin-side">
+        <div class="admin-section admin-section-tight">
+          <div class="admin-section-head">
+            <div>
+              <h3>Tạo tài khoản mới</h3>
+              <p>Thêm nhanh user mới và gán role ngay trong dashboard.</p>
+            </div>
+          </div>
+          <div class="admin-form">
+            <input type="text" id="adminNewUser" placeholder="Username"/>
+            <input type="password" id="adminNewPass" placeholder="Password"/>
+            <select id="adminNewRole">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">➕ Tạo tài khoản</button>
+          </div>
+        </div>
+
+        <div class="admin-section admin-section-tight">
+          <div class="admin-section-head">
+            <div>
+              <h3>Tóm tắt vận hành</h3>
+              <p>Nhìn nhanh để biết hệ thống đang nghiêng về tăng trưởng, khóa tài khoản hay cần gia hạn.</p>
+            </div>
+          </div>
+          <div class="admin-summary-list" id="adminSummaryList">
+            <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="admin-section admin-history-section">
+      <div class="admin-section-head">
+        <div>
+          <h3>Lịch sử toàn hệ thống</h3>
+          <p>Hiển thị batch gen gần đây của cả image và video để super admin theo dõi hoạt động user thuận tiện hơn.</p>
+        </div>
+      </div>
+      <div id="adminHistoryGrid" class="results-grid admin-history-grid">
+        <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+      </div>
+    </section>
   </div>
 </div>
 
