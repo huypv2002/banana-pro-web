@@ -156,8 +156,8 @@ function setMode(mode) {
   // Tính width động: prompt luôn lớn nhất, ảnh chia đều phần còn lại
   // Fixed: #=5%, status=10%, video=15% → còn 70% cho prompt+ảnh
   const imgCols = (hasRef ? 1 : 0) + (hasEnd ? 1 : 0);
-  const imgPct  = imgCols === 0 ? 0 : imgCols === 1 ? 35 : 25; // mỗi cột ảnh
-  const promptPct = 70 - imgCols * imgPct;
+  const imgPct  = imgCols === 0 ? 0 : imgCols === 1 ? 40 : 25;
+  const promptPct = 85 - imgCols * imgPct;
   document.getElementById("colRefHead").style.display = hasRef ? "" : "none";
   document.getElementById("colRefHead").style.width = imgPct + "%";
   document.getElementById("colRefHead").textContent = cfg.refLabel || "Ảnh Ref";
