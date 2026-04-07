@@ -626,6 +626,18 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
     job["status"] = "running"
     ref_images = ref_images or {}
     end_images = end_images or {}
+    # Business rule:
+    # - T2V: 1 video => 3 workers, 2 videos => 2 workers, 3/4 videos => sequential
+    # - All other modes => sequential
+    if mode == "t2v":
+        if num_videos <= 1:
+            workers = 3
+        elif num_videos == 2:
+            workers = 2
+        else:
+            workers = 1
+    else:
+        workers = 1
     is_portrait = "9_16" in model
     aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if is_portrait else "VIDEO_ASPECT_RATIO_LANDSCAPE"
     MAP = {"t2v": VIDEO_MODEL_MAP, "i2v": VIDEO_I2V_MODEL_MAP,
@@ -700,7 +712,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             except Exception as e:
                 return {"prompt": prompt, "urls": [], "error": str(e)}
 
-        if mode == "t2v":
+        if mode == "t2v" and workers > 1:
             # Parallel workers với nối đuôi (queue-based)
             import threading, queue as _queue
             num_w = max(1, min(workers, len(prompts)))
