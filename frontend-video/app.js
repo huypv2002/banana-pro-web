@@ -181,7 +181,30 @@ function _assignBulk(files, store, total, cb) {
 }
 function handleRefBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, rowRefImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
 function handleEndBulkImport(input) { const files = Array.from(input.files); if (!files.length) return; _assignBulk(files, endRowImages, batchFiles.flatMap(f => f.prompts).length, refreshRefCells); input.value = ""; }
-function handleRefRowImport(input) { const file = input.files[0]; if (!file) return; const r = new FileReader(); r.onload = e => { rowRefImages[refImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file); input.value = ""; }
+function handleRefRowImport(input) {
+  const files = Array.from(input.files); if (!files.length) return;
+  const idx = refImportTargetRow;
+  const isR2V = currentMode === "r2v";
+  let loaded = 0; const imgs = [];
+  files.forEach(file => {
+    const r = new FileReader();
+    r.onload = e => {
+      imgs.push(e.target.result);
+      if (++loaded === files.length) {
+        if (isR2V) {
+          // Append to existing list, max 15
+          const existing = Array.isArray(rowRefImages[idx]) ? rowRefImages[idx] : (rowRefImages[idx] ? [rowRefImages[idx]] : []);
+          rowRefImages[idx] = [...existing, ...imgs].slice(0, 15);
+        } else {
+          rowRefImages[idx] = imgs[0]; // single image for i2v/fl
+        }
+        refreshRefCells();
+      }
+    };
+    r.readAsDataURL(file);
+  });
+  input.value = "";
+}
 function handleEndRowImport(input) { const file = input.files[0]; if (!file) return; const r = new FileReader(); r.onload = e => { endRowImages[endImportTargetRow] = e.target.result; refreshRefCells(); }; r.readAsDataURL(file); input.value = ""; }
 function clearRefAll() { rowRefImages = {}; endRowImages = {}; refreshRefCells(); }
 function removeRefImg(idx) { delete rowRefImages[idx]; refreshRefCells(); }
@@ -192,10 +215,18 @@ function refreshRefCells() {
   batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
     const row = document.getElementById(`resRow${i}`); if (!row) return;
     if (cfg.refLabel) {
-      const img = rowRefImages[i];
-      row.cells[2].innerHTML = img
-        ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i})">✕</span></span>`
-        : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ${cfg.refLabel}</span>`;
+      const raw = rowRefImages[i];
+      const imgs = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      const isR2V = currentMode === "r2v";
+      if (imgs.length) {
+        const thumbs = imgs.map((src, j) =>
+          `<span class="ref-wrap"><img src="${src}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i},${j})">✕</span></span>`
+        ).join("");
+        const addBtn = isR2V && imgs.length < 15 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${i})">+</span>` : "";
+        row.cells[2].innerHTML = thumbs + addBtn;
+      } else {
+        row.cells[2].innerHTML = `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ${cfg.refLabel}</span>`;
+      }
     }
     if (cfg.endLabel) {
       const img = endRowImages[i];
@@ -250,7 +281,6 @@ function renderBatchTable() {
 
 // ── Ref Images (per-row + bulk) ──
 function importRefAll() { refImportTargetRow = -1; document.getElementById("refBulkInput").click(); }
-function importRefForRow(idx) { refImportTargetRow = idx; document.getElementById("refRowInput").click(); }
 
 function handleRefBulkImport(input) {
   const files = Array.from(input.files); if (!files.length) return;
@@ -282,19 +312,15 @@ function handleRefRowImport(input) {
   input.value = "";
 }
 
-function clearRefAll() { rowRefImages = {}; refreshRefCells(); }
-
-function removeRefImg(idx) { delete rowRefImages[idx]; refreshRefCells(); }
-
-function refreshRefCells() {
-  batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
-    const row = document.getElementById(`resRow${i}`); if (!row) return;
-    const img = rowRefImages[i];
-    row.cells[2].innerHTML = img
-      ? `<span class="ref-wrap"><img src="${img}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${i})">✕</span></span>`
-      : `<span class="ref-add-btn" onclick="importRefForRow(${i})">+ ảnh</span>`;
-  });
+function clearRefAll() { rowRefImages = {}; endRowImages = {}; refreshRefCells(); }
+function removeRefImg(idx, imgIdx = null) {
+  if (imgIdx !== null && Array.isArray(rowRefImages[idx])) {
+    rowRefImages[idx].splice(imgIdx, 1);
+    if (!rowRefImages[idx].length) delete rowRefImages[idx];
+  } else { delete rowRefImages[idx]; }
+  refreshRefCells();
 }
+function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
 
 // ── Generate ──
 async function startGeneration() {
@@ -323,7 +349,16 @@ async function startGeneration() {
   populateResultsTable();
 
   const refMap = {}, endMap = {};
-  prompts.forEach((_, i) => { if (rowRefImages[i]) refMap[String(i)] = rowRefImages[i]; if (endRowImages[i]) endMap[String(i)] = endRowImages[i]; });
+  prompts.forEach((_, i) => {
+    const raw = rowRefImages[i];
+    if (raw) {
+      // R2V: gửi list; các mode khác: gửi string
+      refMap[String(i)] = currentMode === "r2v"
+        ? (Array.isArray(raw) ? raw : [raw])
+        : (Array.isArray(raw) ? raw[0] : raw);
+    }
+    if (endRowImages[i]) endMap[String(i)] = endRowImages[i];
+  });
 
   try {
     const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap };
@@ -403,9 +438,18 @@ function populateResultsTable() {
     html += `<tr class="file-separator"><td colspan="${cols}">📄 ${esc(strip(f.name))} (${f.prompts.length} prompt)</td></tr>`;
     f.prompts.forEach(text => {
       const refCell = hasRef
-        ? (rowRefImages[idx]
-            ? `<span class="ref-wrap"><img src="${rowRefImages[idx]}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx})">✕</span></span>`
-            : `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ${cfg.refLabel}</span>`)
+        ? (() => {
+            const raw = rowRefImages[idx];
+            const imgs = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+            const isR2V = currentMode === "r2v";
+            if (imgs.length) {
+              const thumbs = imgs.map((src, j) =>
+                `<span class="ref-wrap"><img src="${src}" class="ref-thumb" onclick="window.open(this.src)"/><span class="ref-del" onclick="removeRefImg(${idx},${j})">✕</span></span>`
+              ).join("");
+              return thumbs + (isR2V && imgs.length < 15 ? `<br><span class="ref-add-btn" onclick="importRefForRow(${idx})">+</span>` : "");
+            }
+            return `<span class="ref-add-btn" onclick="importRefForRow(${idx})">+ ${cfg.refLabel}</span>`;
+          })()
         : "";
       const endCell = hasEnd
         ? (endRowImages[idx]

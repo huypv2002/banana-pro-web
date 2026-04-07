@@ -535,7 +535,13 @@ def get_video_job(job_id: str):
             "completed": job["completed"], "videos": job.get("videos", []), "error": job.get("error")}
 
 
-def _upload_b64(client, b64: str) -> str:
+def _upload_b64(client, b64: str, cache: dict = None) -> str:
+    """Upload base64 image, return media_id. Dùng cache để tránh upload lại."""
+    import hashlib
+    key = hashlib.md5(b64[:200].encode()).hexdigest()  # hash nhanh từ đầu chuỗi
+    if cache is not None and key in cache:
+        logger.info(f"[Upload Cache] HIT {key[:8]}... → {cache[key][:8]}...")
+        return cache[key]
     import tempfile, base64 as _b64
     header, data = b64.split(',', 1) if ',' in b64 else ('', b64)
     ext = 'png' if 'png' in header else 'jpg'
@@ -545,7 +551,39 @@ def _upload_b64(client, b64: str) -> str:
     os.unlink(tmp)
     if not mid:
         raise ValueError("Upload ảnh thất bại: " + (client.last_error_detail or ""))
+    if cache is not None:
+        cache[key] = mid
     return mid
+
+
+def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
+                  model_key: str, num_videos: int, aspect: str):
+    import uuid as _uuid, time as _time, json as _json
+    url = "https://aisandbox-pa.googleapis.com/v1/video:batchAsyncGenerateVideoIntegrateImages"
+    seeds = [int(_time.time() * 1000000 + i) % 100000 for i in range(num_videos)]
+    requests_body = [{
+        "aspectRatio": aspect,
+        "metadata": {"sceneId": str(_uuid.uuid4())},
+        "referenceImages": [{"imageUsageType": "IMAGE_USAGE_TYPE_ASSET", "mediaId": mid} for mid in media_ids],
+        "seed": seeds[i],
+        "textInput": {"prompt": prompt.strip()},
+        "videoModelKey": model_key,
+    } for i in range(num_videos)]
+    payload = {
+        "clientContext": {
+            "sessionId": f";{int(_time.time() * 1000)}",
+            "projectId": project_id, "tool": "BACKBONE", "userPaygateTier": "PAYGATE_TIER_TWO",
+        },
+        "requests": requests_body,
+    }
+    client._maybe_inject_recaptcha(payload["clientContext"], raise_on_fail=False, recaptcha_action="VIDEO_GENERATION")
+    client._convert_to_recaptcha_context(payload["clientContext"])
+    resp = client.session.post(url, headers=client._aisandbox_headers(), data=_json.dumps(payload), timeout=120)
+    if resp.status_code == 200:
+        data = resp.json()
+        return data.get("operations", [data])
+    client.last_error_detail = f"R2V HTTP {resp.status_code}: {resp.text[:200]}"
+    return None
 
 
 def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
@@ -569,13 +607,18 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
         if not client.fetch_access_token():
             raise ValueError("Không thể lấy access token.")
         project_id = client.flow_project_id
+        upload_cache = {}  # {b64_hash: media_id} — cache per job
 
         for idx, prompt in enumerate(prompts):
             if job.get("cancelled"):
                 break
             try:
-                ref_b64 = ref_images.get(str(idx))
+                ref_raw = ref_images.get(str(idx))
+                # ref_raw có thể là string (1 ảnh) hoặc list (nhiều ảnh cho R2V)
+                ref_b64_list = ref_raw if isinstance(ref_raw, list) else ([ref_raw] if ref_raw else [])
+                ref_b64 = ref_b64_list[0] if ref_b64_list else None
                 end_b64 = end_images.get(str(idx))
+
                 if mode == "t2v":
                     result = client.generate_videos(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
@@ -584,20 +627,20 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                     if not ref_b64: raise ValueError("Prompt này chưa có ảnh Start")
                     result = client.generate_videos_from_image(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                        prompt=prompt, media_id=_upload_b64(client, ref_b64),
+                        prompt=prompt, media_id=_upload_b64(client, ref_b64, upload_cache),
                         model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
                 elif mode == "fl":
                     if not ref_b64 or not end_b64: raise ValueError("Cần cả ảnh Start và End")
                     result = client.generate_videos_from_start_end(
                         project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                        prompt=prompt, start_media_id=_upload_b64(client, ref_b64),
-                        end_media_id=_upload_b64(client, end_b64),
+                        prompt=prompt,
+                        start_media_id=_upload_b64(client, ref_b64, upload_cache),
+                        end_media_id=_upload_b64(client, end_b64, upload_cache),
                         model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
                 elif mode == "r2v":
-                    if not ref_b64: raise ValueError("Prompt này chưa có ảnh tham chiếu")
-                    result = client.generate_videos(
-                        project_id=project_id, tool="BACKBONE", user_tier="PAYGATE_TIER_TWO",
-                        prompt=prompt, model_key=model_key, num_videos=num_videos, aspect_ratio=aspect)
+                    if not ref_b64_list: raise ValueError("Prompt này chưa có ảnh tham chiếu")
+                    media_ids = [_upload_b64(client, b64, upload_cache) for b64 in ref_b64_list[:15]]
+                    result = _generate_r2v(client, project_id, prompt, media_ids, model_key, num_videos, aspect)
                 else:
                     raise ValueError(f"Mode không hợp lệ: {mode}")
 
