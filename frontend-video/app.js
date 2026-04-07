@@ -8,11 +8,17 @@ async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire
 let authToken = localStorage.getItem("bp_token") || "";
 let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
 let cookies = [];
-let batchFiles = [];
 let currentJobId = null;
 let pollInterval = null;
 let pollFailCount = 0;
 let currentMode = "t2v";
+const modeBatchFiles = { t2v: [], i2v: [], fl: [], r2v: [] };
+const modeSourcePaths = {
+  t2v: { txt: "", folder: "" },
+  i2v: { txt: "", folder: "" },
+  fl: { txt: "", folder: "" },
+  r2v: { txt: "", folder: "" },
+};
 // Per-mode image stores — không share giữa các tab
 const modeRefImages = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
 const modeEndImages = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
@@ -91,6 +97,9 @@ const MODE_CONFIG = {
 };
 
 function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+function getBatchFiles() { return modeBatchFiles[currentMode]; }
+function setBatchFiles(files) { modeBatchFiles[currentMode] = files; }
+function getSourcePaths() { return modeSourcePaths[currentMode]; }
 
 function apiFetch(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
@@ -177,6 +186,8 @@ function setMode(mode) {
   // Workers chỉ hiện cho T2V
   document.getElementById("labelWorkers").style.display = mode === "t2v" ? "" : "none";
   document.getElementById("workersInput").style.display = mode === "t2v" ? "" : "none";
+  syncPromptSourceUI();
+  renderBatchTable();
   if (!currentJobId) populateResultsTable();
 }
 
@@ -198,7 +209,7 @@ function importEndForRow(idx) { endImportTargetRow = idx; document.getElementByI
 
 function handleEndBulkImport(input) {
   const files = Array.from(input.files); if (!files.length) return;
-  const total = batchFiles.flatMap(f => f.prompts).length;
+  const total = getBatchFiles().flatMap(f => f.prompts).length;
   let loaded = 0; const imgs = [];
   files.forEach(file => { const r = new FileReader(); r.onload = e => { imgs.push(e.target.result); if (++loaded === files.length) { for (let i = 0; i < total; i++) endRowImages[i] = imgs.length === 1 ? imgs[0] : (imgs[i] || imgs[imgs.length - 1]); refreshRefCells(); } }; r.readAsDataURL(file); });
   input.value = "";
@@ -220,7 +231,7 @@ function _renderRefCell(imgs, isR2V, addFn) {
 
 function refreshRefCells() {
   const cfg = MODE_CONFIG[currentMode];
-  batchFiles.flatMap(f => f.prompts).forEach((_, i) => {
+  getBatchFiles().flatMap(f => f.prompts).forEach((_, i) => {
     const row = document.getElementById(`resRow${i}`); if (!row) return;
     if (cfg.refLabel) {
       const raw = rowRefImages[i];
@@ -269,21 +280,51 @@ function closeCookieModal() { document.getElementById("cookieModal").style.displ
 // ── Prompt Sources ──
 function loadTxtFile(input) {
   const file = input.files[0]; if (!file) return;
-  document.getElementById("txtFilePath").value = file.name;
-  document.getElementById("folderTxtPath").value = ""; batchFiles = [];
+  const sourcePaths = getSourcePaths();
+  sourcePaths.txt = file.name;
+  sourcePaths.folder = "";
+  syncPromptSourceUI();
+  setBatchFiles([]);
   const reader = new FileReader();
-  reader.onload = e => { batchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }); renderBatchTable(); };
+  reader.onload = e => {
+    setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }]);
+    renderBatchTable();
+  };
   reader.readAsText(file);
+  input.value = "";
 }
 function loadFolderTxt(input) {
   const files = Array.from(input.files).filter(f => f.name.endsWith(".txt")); if (!files.length) return;
-  document.getElementById("folderTxtPath").value = input.files[0].webkitRelativePath.split("/")[0];
-  document.getElementById("txtFilePath").value = ""; batchFiles = [];
+  const sourcePaths = getSourcePaths();
+  sourcePaths.folder = input.files[0].webkitRelativePath.split("/")[0];
+  sourcePaths.txt = "";
+  syncPromptSourceUI();
+  setBatchFiles([]);
   let loaded = 0;
-  files.forEach(file => { const r = new FileReader(); r.onload = e => { batchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }); if (++loaded === files.length) renderBatchTable(); }; r.readAsText(file); });
+  const nextBatchFiles = [];
+  files.forEach(file => {
+    const r = new FileReader();
+    r.onload = e => {
+      nextBatchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" });
+      if (++loaded === files.length) {
+        setBatchFiles(nextBatchFiles);
+        renderBatchTable();
+      }
+    };
+    r.readAsText(file);
+  });
+  input.value = "";
 }
-function clearSources() { batchFiles = []; rowRefImages = {}; document.getElementById("txtFilePath").value = ""; document.getElementById("folderTxtPath").value = ""; renderBatchTable(); }
+function clearSources() {
+  setBatchFiles([]);
+  modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
+  modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  modeSourcePaths[currentMode] = { txt: "", folder: "" };
+  syncPromptSourceUI();
+  renderBatchTable();
+}
 function renderBatchTable() {
+  const batchFiles = getBatchFiles();
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("") || '<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:12px">Chưa có file</td></tr>';
   if (!currentJobId) populateResultsTable();
 }
@@ -293,7 +334,7 @@ function importRefAll() { refImportTargetRow = -1; document.getElementById("refB
 
 function handleRefBulkImport(input) {
   const files = Array.from(input.files); if (!files.length) return;
-  const total = batchFiles.flatMap(f => f.prompts).length;
+  const total = getBatchFiles().flatMap(f => f.prompts).length;
   const isR2V = currentMode === "r2v";
   let loaded = 0; const imgs = [];
   files.forEach(file => {
@@ -358,7 +399,7 @@ function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
 // ── Generate ──
 async function startGeneration() {
   if (!cookies.length) { sAlert("Vui lòng thêm cookie."); return; }
-  const prompts = batchFiles.flatMap(f => f.prompts);
+  const prompts = getBatchFiles().flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
 
   const model = document.getElementById("modelSelect").value;
@@ -455,6 +496,7 @@ function updateProgress(job) {
 }
 
 function populateResultsTable() {
+  const batchFiles = getBatchFiles();
   const allPrompts = batchFiles.flatMap(f => f.prompts);
   const tbody = document.getElementById("resultsBody");
   const empty = document.getElementById("resultsEmpty");
@@ -507,25 +549,32 @@ function populateResultsTable() {
 }
 
 function updateResults(job) {
+  const batchFiles = getBatchFiles();
   const videos = job.videos || [];
+  const cfg = MODE_CONFIG[currentMode];
+  const statusCellIdx = 2 + (cfg.refLabel ? 1 : 0) + (cfg.endLabel ? 1 : 0);
+  const videoCellIdx = statusCellIdx + 1;
+
   videos.forEach((v, idx) => {
     const row = document.getElementById(`resRow${idx}`); if (!row) return;
+    if (!v) return;
     if (v.urls && v.urls.length) {
       row.className = "row-done";
-      row.cells[3].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${v.mode === 'i2v' ? '🖼 I2V' : '📝 T2V'}</span>`;
-      row.cells[4].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">▶ Video ${i + 1}</a>`).join("");
+      row.cells[statusCellIdx].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${modeLabel(v.mode || currentMode)}</span>`;
+      row.cells[videoCellIdx].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">▶ Video ${i + 1}</a>`).join("");
     } else if (v.error) {
       row.className = "row-error";
-      row.cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';
-      row.cells[4].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
+      row.cells[statusCellIdx].innerHTML = '<span class="status-err">❌ Lỗi</span>';
+      row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
     }
   });
   // Mark running
-  if (job.status === "running" && videos.length < job.total) {
-    const row = document.getElementById(`resRow${videos.length}`);
+  if (job.status === "running" && job.completed < job.total) {
+    const nextIdx = videos.findIndex(v => !v);
+    const row = document.getElementById(`resRow${nextIdx >= 0 ? nextIdx : job.completed}`);
     if (row && row.className !== "row-done" && row.className !== "row-error") {
       row.className = "row-running";
-      row.cells[3].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
+      row.cells[statusCellIdx].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
       row.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
@@ -533,10 +582,27 @@ function updateResults(job) {
   let offset = 0;
   batchFiles.forEach(f => {
     const end = offset + f.prompts.length;
-    const done = videos.slice(offset, end).filter(v => v).length;
+    const done = videos.slice(offset, end).filter(v => !!v).length;
     if (done >= f.prompts.length) f.status = videos.slice(offset, end).every(v => v && v.urls?.length) ? "✅ Xong" : "⚠️ Có lỗi";
     else if (done > 0) f.status = `🔄 ${done}/${f.prompts.length}`;
+    else f.status = "⏳ Chờ";
     offset = end;
   });
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("");
+}
+
+function modeLabel(mode) {
+  const labels = {
+    t2v: "📝 T2V",
+    i2v: "🖼 I2V",
+    fl: "🎞 FL",
+    r2v: "🎨 R2V",
+  };
+  return labels[mode] || "🎬 Video";
+}
+
+function syncPromptSourceUI() {
+  const sourcePaths = getSourcePaths();
+  document.getElementById("txtFilePath").value = sourcePaths.txt || "";
+  document.getElementById("folderTxtPath").value = sourcePaths.folder || "";
 }
