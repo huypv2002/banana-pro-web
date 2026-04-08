@@ -11,6 +11,26 @@ function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 function sError(text) { return Swal.fire({ text, icon: "error", confirmButtonColor: "#16a34a" }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
+function planScopeLabel(scope) { return scope === "image" ? "Chỉ ảnh" : scope === "video" ? "Chỉ video" : "Ảnh + Video"; }
+function hasFeatureAccess(feature) {
+  if (!authUser) return false;
+  if (["admin", "super_admin"].includes(authUser.role)) return true;
+  const scope = authUser.plan_scope || "both";
+  return scope === "both" || scope === feature;
+}
+function showUpgradePopup(feature = "video") {
+  const targetLabel = feature === "video" ? "video" : "tạo ảnh";
+  return Swal.fire({
+    icon: "info",
+    title: `Gói hiện tại chưa mở ${targetLabel}`,
+    html: `<div style="text-align:left;font-size:0.92rem;line-height:1.7">
+      <p>Anh/chị đang dùng gói <b>${planScopeLabel(authUser?.plan_scope || "both")}</b>, nên tính năng <b>${targetLabel}</b> tạm thời chưa khả dụng.</p>
+      <p>Nếu anh/chị cần dùng thêm, chỉ cần nhắn admin giúp em một câu. Bên em sẽ hỗ trợ nâng cấp gói thật nhanh để mình dùng trọn bộ tính năng ạ.</p>
+    </div>`,
+    confirmButtonColor: "#16a34a",
+    confirmButtonText: "Đã hiểu",
+  });
+}
 
 // ── Auth State ────────────────────────────────────────────────────────────────
 let authToken = LEGACY_TOKEN_KEYS.map(k => localStorage.getItem(k)).find(Boolean) || "";
@@ -87,6 +107,7 @@ function showApp() {
   } else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   document.getElementById("navAdmin").style.display = ["admin", "super_admin"].includes(authUser.role) ? "" : "none";
   loadCookiesFromDB();
+  applyFeatureLock();
 }
 
 function switchAuthTab(tab) {
@@ -142,6 +163,31 @@ function switchApp(url) {
   window.location.assign(url);
 }
 
+function applyFeatureLock() {
+  const generateTab = document.getElementById("tabGenerate");
+  if (!generateTab) return;
+  generateTab.classList.toggle("feature-locked", !hasFeatureAccess("image"));
+  let overlay = document.getElementById("featureLockOverlay");
+  if (hasFeatureAccess("image")) {
+    if (overlay) overlay.remove();
+    return;
+  }
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "featureLockOverlay";
+    overlay.className = "feature-lock-overlay";
+    overlay.innerHTML = `<div class="feature-lock-card">
+      <div class="feature-lock-pill">Cần nâng cấp gói</div>
+      <h3>Tính năng tạo ảnh đang được khóa</h3>
+      <p>Anh/chị cứ yên tâm, giao diện vẫn ở đây đầy đủ để mình tham khảo. Khi cần mở tính năng tạo ảnh, anh/chị chỉ cần liên hệ admin là bên em hỗ trợ nâng cấp gói rất nhanh ạ.</p>
+      <button class="btn btn-green" type="button">Liên hệ admin để nâng cấp</button>
+    </div>`;
+    overlay.addEventListener("click", () => showUpgradePopup("image"));
+    overlay.querySelector("button")?.addEventListener("click", ev => { ev.stopPropagation(); showUpgradePopup("image"); });
+    generateTab.appendChild(overlay);
+  }
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function showTab(tab) {
   ["Generate", "History", "Admin"].forEach(t => {
@@ -174,6 +220,7 @@ function updateCookieQuotaInfo() {
 }
 
 async function addCookie() {
+  if (!hasFeatureAccess("image")) { showUpgradePopup("image"); return; }
   const raw = document.getElementById("newCookieInput").value.trim();
   if (!raw) return;
   const parsed = parseCookieInput(raw);
@@ -381,6 +428,7 @@ function renderFolderStructureTable() {
 
 // ── Generate ──────────────────────────────────────────────────────────────────
 async function startGeneration() {
+  if (!hasFeatureAccess("image")) { showUpgradePopup("image"); return; }
   if (!cookies.length) { showError("Vui lòng thêm cookie trong mục Quản lý Cookie."); return; }
 
   // Warn if cookie is older than 10 hours
@@ -839,6 +887,13 @@ async function loadAdminUsers() {
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
       const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
+      const planScopeControl = ["admin", "super_admin"].includes(authUser?.role)
+        ? `<select onchange="adminSetPlanScope(${u.id}, this.value)">
+            <option value="image" ${u.plan_scope === "image" ? "selected" : ""}>Chỉ ảnh</option>
+            <option value="video" ${u.plan_scope === "video" ? "selected" : ""}>Chỉ video</option>
+            <option value="both" ${(u.plan_scope || "both") === "both" ? "selected" : ""}>Ảnh + Video</option>
+          </select>`
+        : `<span>${planScopeLabel(u.plan_scope || "both")}</span>`;
       const planClass = planActive ? "status-ok" : "status-err";
       const quotaControl = ["admin", "super_admin"].includes(authUser?.role)
         ? `<input type="number" min="1" max="50" value="${u.cookie_quota ?? 5}" onchange="adminSetCookieQuota(${u.id}, this.value)" style="width:84px"/>`
@@ -851,7 +906,7 @@ async function loadAdminUsers() {
         <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Chủ hệ thống</option>
       </select></td>
       <td>${quotaControl}</td>
-      <td><span class="${planClass}">${planText}</span>
+      <td>${planScopeControl}<div style="margin-top:6px"><span class="${planClass}">${planText}</span></div>
         ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30d</button>
@@ -861,7 +916,7 @@ async function loadAdminUsers() {
       </td>
       <td>${u.disabled ? '<span class="status-err">Đã khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
       <td>
-        <button class="btn btn-ghost" onclick="adminEditUser(${u.id},'${esc(u.username)}',${u.cookie_quota ?? 5})">Sửa</button>
+        <button class="btn btn-ghost" onclick="adminEditUser(${u.id},'${esc(u.username)}',${u.cookie_quota ?? 5},'${esc(u.plan_scope || "both")}')">Sửa</button>
         <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "Mở khóa" : "Khóa"}</button>
         ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
       </td>
@@ -876,6 +931,11 @@ async function loadAdminUsers() {
           <td>${u.id}</td>
           <td>${esc(u.username)}</td>
           <td>${roleLabel(u.role)}</td>
+          <td><select onchange="adminSetPlanScope(${u.id}, this.value)">
+            <option value="image" ${u.plan_scope === "image" ? "selected" : ""}>Chỉ ảnh</option>
+            <option value="video" ${u.plan_scope === "video" ? "selected" : ""}>Chỉ video</option>
+            <option value="both" ${(u.plan_scope || "both") === "both" ? "selected" : ""}>Ảnh + Video</option>
+          </select></td>
           <td><span class="${planActive ? "status-ok" : "status-err"}">${planText}</span></td>
           <td>
             ${!["admin", "super_admin"].includes(u.role) ? `
@@ -920,13 +980,15 @@ async function adminAddUser() {
   const username = document.getElementById("adminNewUser").value.trim();
   const password = document.getElementById("adminNewPass").value;
   const role = document.getElementById("adminNewRole").value;
+  const planScope = document.getElementById("adminNewPlanScope").value;
   const cookieQuota = parseInt(document.getElementById("adminNewCookieQuota")?.value || "5") || 5;
   if (!username || !password) { sAlert("Thiếu username/password"); return; }
-  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota }) });
+  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota, plan_scope: planScope }) });
   const data = await res.json();
   if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("adminNewUser").value = "";
   document.getElementById("adminNewPass").value = "";
+  if (document.getElementById("adminNewPlanScope")) document.getElementById("adminNewPlanScope").value = "both";
   if (document.getElementById("adminNewCookieQuota")) document.getElementById("adminNewCookieQuota").value = "5";
   loadAdminUsers();
 }
@@ -934,7 +996,7 @@ async function adminAddUser() {
 async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
 async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
-async function adminEditUser(id, username, cookieQuota) {
+async function adminEditUser(id, username, cookieQuota, planScope = "both") {
   const canEditQuota = ["admin", "super_admin"].includes(authUser?.role);
   const result = await Swal.fire({
     title: "Sửa người dùng",
@@ -952,6 +1014,14 @@ async function adminEditUser(id, username, cookieQuota) {
           <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Giới hạn cookie</label>
           <input id="swalAdminCookieQuota" type="number" min="1" max="50" class="swal2-input" value="${cookieQuota || 5}" style="margin:0;width:100%" />
         </div>` : ""}
+        <div>
+          <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Loại gói</label>
+          <select id="swalAdminPlanScope" class="swal2-input" style="margin:0;width:100%">
+            <option value="image" ${planScope === "image" ? "selected" : ""}>Chỉ ảnh</option>
+            <option value="video" ${planScope === "video" ? "selected" : ""}>Chỉ video</option>
+            <option value="both" ${planScope === "both" ? "selected" : ""}>Ảnh + Video</option>
+          </select>
+        </div>
       </div>`,
     focusConfirm: false,
     showCancelButton: true,
@@ -966,13 +1036,14 @@ async function adminEditUser(id, username, cookieQuota) {
         Swal.showValidationMessage("Tên đăng nhập không được để trống");
         return false;
       }
-      return { username: nextUsername, password: nextPassword, cookie_quota: nextQuota };
+      return { username: nextUsername, password: nextPassword, cookie_quota: nextQuota, plan_scope: document.getElementById("swalAdminPlanScope").value };
     }
   });
   if (!result.isConfirmed) return;
   const payload = { username: result.value.username };
   if (result.value.password) payload.password = result.value.password;
   if (canEditQuota) payload.cookie_quota = result.value.cookie_quota;
+  payload.plan_scope = result.value.plan_scope;
   const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { sAlert(data.error || "Không thể cập nhật user"); return; }
@@ -981,6 +1052,11 @@ async function adminEditUser(id, username, cookieQuota) {
 async function adminSetPlan(id, days) {
   if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
   await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  loadAdminUsers();
+}
+
+async function adminSetPlanScope(id, planScope) {
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_scope: planScope }) });
   loadAdminUsers();
 }
 

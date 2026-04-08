@@ -7,6 +7,17 @@ function getEffectiveRole(userLike) {
   return userLike.username === SUPER_ADMIN_USERNAME ? "super_admin" : (userLike.role || "user");
 }
 
+function normalizePlanScope(scope) {
+  return ["image", "video", "both"].includes(scope) ? scope : "both";
+}
+
+function hasFeatureAccess(userLike, feature) {
+  const role = getEffectiveRole(userLike);
+  if (["admin", "super_admin"].includes(role)) return true;
+  const scope = normalizePlanScope(userLike?.plan_scope);
+  return scope === "both" || scope === feature;
+}
+
 export default {
   async fetch(request, env) {
     await ensureSuperAdminAccount(env);
@@ -69,10 +80,16 @@ async function handleGenerate(request, env, vpsPath = "/generate") {
   if (e) return e;
   await ensureUserSchema(env);
   // Check plan
-  const u = await env.DB.prepare("SELECT role,plan_expires_at,cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
+  const u = await env.DB.prepare("SELECT role,plan_expires_at,cookie_quota,plan_scope FROM users WHERE id=?").bind(user.user_id).first();
   if (getEffectiveRole({ username: user.username, role: u.role }) !== "super_admin") {
     if (!u.plan_expires_at || u.plan_expires_at < new Date().toISOString())
       return err("Gói của bạn đã hết hạn. Vui lòng liên hệ admin để gia hạn.", 403);
+  }
+  const feature = vpsPath === "/generate" ? "image" : "video";
+  if (!hasFeatureAccess({ username: user.username, role: u.role, plan_scope: u.plan_scope }, feature)) {
+    return err(feature === "video"
+      ? "Gói hiện tại của bạn chưa mở tính năng video. Bạn chỉ cần nhắn admin một câu là bên mình sẽ hỗ trợ nâng cấp gói thật nhanh cho bạn."
+      : "Gói hiện tại của bạn chưa mở tính năng tạo ảnh. Bạn nhắn admin giúp mình để được hỗ trợ nâng cấp gói phù hợp nhé.", 403);
   }
   const body = await request.json();
   // If no cookie in body, inject from D1
@@ -243,11 +260,11 @@ async function handleMe(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
   await ensureUserSchema(env);
-  const u = await env.DB.prepare("SELECT username,role,plan_expires_at,cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
+  const u = await env.DB.prepare("SELECT username,role,plan_expires_at,cookie_quota,plan_scope FROM users WHERE id=?").bind(user.user_id).first();
   const now = new Date().toISOString();
   const effectiveRole = getEffectiveRole(u);
   const planActive = ["admin", "super_admin"].includes(effectiveRole) || (u.plan_expires_at && u.plan_expires_at > now);
-  return json({ username: u.username, role: effectiveRole, plan_expires_at: u.plan_expires_at, plan_active: planActive, cookie_quota: u.cookie_quota ?? 5 });
+  return json({ username: u.username, role: effectiveRole, plan_expires_at: u.plan_expires_at, plan_active: planActive, cookie_quota: u.cookie_quota ?? 5, plan_scope: normalizePlanScope(u.plan_scope) });
 }
 
 async function handleChangePassword(request, env) {
@@ -270,7 +287,7 @@ async function adminListUsers(request, env) {
   const [, e] = await requireAdmin(request, env);
   if (e) return e;
   await ensureUserSchema(env);
-  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at,cookie_quota FROM users ORDER BY id").all();
+  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at,cookie_quota,plan_scope FROM users ORDER BY id").all();
   return json(results.map(user => ({ ...user, role: getEffectiveRole(user) })));
 }
 
@@ -278,12 +295,12 @@ async function adminCreateUser(request, env) {
   const [actor, e] = await requireAdmin(request, env);
   if (e) return e;
   await ensureUserSchema(env);
-  const { username, password, role, cookie_quota } = await request.json();
+  const { username, password, role, cookie_quota, plan_scope } = await request.json();
   if (!username || !password) return err("Thiếu username/password");
   const hash = await sha256(password);
   const quota = Math.max(1, Math.min(50, parseInt(cookie_quota ?? 5) || 5));
   try {
-    await env.DB.prepare("INSERT INTO users(username,password_hash,role,cookie_quota) VALUES(?,?,?,?)").bind(username, hash, role || "user", getEffectiveRole(actor) === "super_admin" ? quota : 5).run();
+    await env.DB.prepare("INSERT INTO users(username,password_hash,role,cookie_quota,plan_scope) VALUES(?,?,?,?,?)").bind(username, hash, role || "user", getEffectiveRole(actor) === "super_admin" ? quota : 5, normalizePlanScope(plan_scope)).run();
     return json({ ok: true });
   } catch (e) {
     if (e.message?.includes("UNIQUE")) return err("Username đã tồn tại");
@@ -315,6 +332,10 @@ async function adminUpdateUser(request, env, path) {
     if (!["admin", "super_admin"].includes(getEffectiveRole(actor))) return err("Chỉ quản trị viên mới được đổi giới hạn cookie", 403);
     sets.push("cookie_quota=?");
     vals.push(Math.max(1, Math.min(50, parseInt(body.cookie_quota) || 1)));
+  }
+  if (body.plan_scope !== undefined) {
+    sets.push("plan_scope=?");
+    vals.push(normalizePlanScope(body.plan_scope));
   }
   if (body.plan_days !== undefined) {
     if (body.plan_days <= 0) { sets.push("plan_expires_at=NULL"); }
@@ -645,6 +666,8 @@ async function saveHistory(request, env) {
 
 async function ensureUserSchema(env) {
   try { await env.DB.prepare("ALTER TABLE users ADD COLUMN cookie_quota INTEGER DEFAULT 5").run(); } catch (e) {}
+  try { await env.DB.prepare("ALTER TABLE users ADD COLUMN plan_scope TEXT DEFAULT 'both'").run(); } catch (e) {}
+  try { await env.DB.prepare("UPDATE users SET plan_scope='both' WHERE plan_scope IS NULL OR plan_scope=''").run(); } catch (e) {}
   try { await env.DB.prepare("UPDATE users SET cookie_quota=20 WHERE username=?").bind(SUPER_ADMIN_USERNAME).run(); } catch (e) {}
 }
 

@@ -46,8 +46,8 @@
   </nav>
   <div class="header-right">
     <div class="app-switcher">
-      <button type="button" class="app-switch-link active" onclick="switchApp('/')">Ảnh</button>
-      <button type="button" class="app-switch-link" onclick="switchApp('/video/')">Video</button>
+      <a class="app-switch-link active" href="/">Ảnh</a>
+      <a class="app-switch-link" href="/video/">Video</a>
     </div>
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
@@ -337,6 +337,11 @@
                     <option value="user">Người dùng</option>
                     <option value="admin">Quản trị viên</option>
                   </select>
+                  <select id="adminNewPlanScope">
+                    <option value="image">Gói chỉ ảnh</option>
+                    <option value="video">Gói chỉ video</option>
+                    <option value="both" selected>Gói ảnh + video</option>
+                  </select>
                   <input type="number" id="adminNewCookieQuota" min="1" max="50" value="5" placeholder="Giới hạn cookie"/>
                   <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
                 </div>
@@ -355,7 +360,7 @@
             </div>
             <div class="admin-table-wrap">
               <table class="cookie-table admin-user-table">
-                <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Trạng thái gói</th><th>Gia hạn nhanh</th></tr></thead>
+                <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Loại gói</th><th>Trạng thái gói</th><th>Gia hạn nhanh</th></tr></thead>
                 <tbody id="adminPlanBody"></tbody>
               </table>
             </div>
