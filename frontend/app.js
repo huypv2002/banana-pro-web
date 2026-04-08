@@ -1,4 +1,6 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
+const STORAGE_TOKEN_KEY = "bp_image_token";
+const STORAGE_USER_KEY = "bp_image_user";
 
 // ── SweetAlert2 helpers ───────────────────────────────────────────────────────
 const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500, timerProgressBar: true });
@@ -9,8 +11,8 @@ async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
 
 // ── Auth State ────────────────────────────────────────────────────────────────
-let authToken = localStorage.getItem("bp_token") || "";
-let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
+let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || "";
+let authUser = JSON.parse(localStorage.getItem(STORAGE_USER_KEY) || "null");
 let authTab = "login";
 
 // ── App State ─────────────────────────────────────────────────────────────────
@@ -37,7 +39,7 @@ const autoDownloadedJobIds = new Set();
       if (res.ok) {
         const data = await res.json();
         authUser = data;
-        localStorage.setItem("bp_user", JSON.stringify(data));
+        localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data));
         showApp();
         return;
       }
@@ -102,10 +104,10 @@ async function handleAuth(e) {
     if (!res.ok) { errEl.textContent = data.error || "Lỗi"; errEl.style.display = "block"; return false; }
     authToken = data.token;
     authUser = { username: data.username, role: data.role };
-    localStorage.setItem("bp_token", authToken);
-    localStorage.setItem("bp_user", JSON.stringify(authUser));
+    localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
     // Fetch plan info
-    try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem("bp_user", JSON.stringify(authUser)); } } catch(_){}
+    try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser)); } } catch(_){}
     showApp();
   } catch (e) {
     errEl.textContent = "Lỗi kết nối: " + e.message;
@@ -123,8 +125,14 @@ async function handleLogout() {
 function clearAuth() {
   authToken = "";
   authUser = null;
-  localStorage.removeItem("bp_token");
-  localStorage.removeItem("bp_user");
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
+  localStorage.removeItem(STORAGE_USER_KEY);
+}
+
+function switchApp(url) {
+  const target = new URL(url);
+  target.searchParams.set("_sw", String(Date.now()));
+  window.location.assign(target.toString());
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────

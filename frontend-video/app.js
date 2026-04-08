@@ -1,4 +1,6 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
+const STORAGE_TOKEN_KEY = "bp_video_token";
+const STORAGE_USER_KEY = "bp_video_user";
 
 const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500, timerProgressBar: true });
 function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmButtonColor: "#16a34a" }); }
@@ -6,8 +8,8 @@ function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
 
-let authToken = localStorage.getItem("bp_token") || "";
-let authUser = JSON.parse(localStorage.getItem("bp_user") || "null");
+let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || "";
+let authUser = JSON.parse(localStorage.getItem(STORAGE_USER_KEY) || "null");
 let cookies = [];
 let currentJobId = null;
 let pollInterval = null;
@@ -118,7 +120,7 @@ function apiFetch(path, opts = {}) {
 (async function init() {
   setMode("t2v"); // populate model select on load
   if (authToken && authUser) {
-    try { const res = await apiFetch("/auth/me"); if (res.ok) { authUser = await res.json(); localStorage.setItem("bp_user", JSON.stringify(authUser)); showApp(); return; } } catch (e) {}
+    try { const res = await apiFetch("/auth/me"); if (res.ok) { authUser = await res.json(); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser)); showApp(); return; } } catch (e) {}
     clearAuth();
   }
   showLogin();
@@ -137,8 +139,13 @@ function showApp() {
   loadCookiesFromDB();
   showTab("generate");
 }
-function clearAuth() { authToken = ""; authUser = null; localStorage.removeItem("bp_token"); localStorage.removeItem("bp_user"); }
+function clearAuth() { authToken = ""; authUser = null; localStorage.removeItem(STORAGE_TOKEN_KEY); localStorage.removeItem(STORAGE_USER_KEY); }
 function logout() { clearAuth(); showLogin(); }
+function switchApp(url) {
+  const target = new URL(url);
+  target.searchParams.set("_sw", String(Date.now()));
+  window.location.assign(target.toString());
+}
 let authTab = "login";
 function switchAuthTab(tab) {
   authTab = tab;
@@ -154,8 +161,8 @@ async function handleAuth(e) {
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || "Lỗi"; errEl.style.display = "block"; return false; }
     authToken = data.token; authUser = { username: data.username, role: data.role };
-    localStorage.setItem("bp_token", authToken); localStorage.setItem("bp_user", JSON.stringify(authUser));
-    try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem("bp_user", JSON.stringify(authUser)); } } catch(_){}
+    localStorage.setItem(STORAGE_TOKEN_KEY, authToken); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
+    try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser)); } } catch(_){}
     showApp();
   } catch (e) { errEl.textContent = "Lỗi kết nối"; errEl.style.display = "block"; }
   return false;
