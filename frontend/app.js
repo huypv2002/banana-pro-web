@@ -846,6 +846,7 @@ async function loadAdminUsers() {
       </td>
       <td>${u.disabled ? '<span class="status-err">Đã khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
       <td>
+        <button class="btn btn-ghost" onclick="adminEditUser(${u.id},'${esc(u.username)}',${u.cookie_quota ?? 5})">Sửa</button>
         <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "Mở khóa" : "Khóa"}</button>
         ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
       </td>
@@ -918,6 +919,50 @@ async function adminAddUser() {
 async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
 async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminEditUser(id, username, cookieQuota) {
+  const canEditQuota = authUser?.role === "super_admin";
+  const result = await Swal.fire({
+    title: "Sửa người dùng",
+    html: `
+      <div style="display:grid;gap:10px;text-align:left">
+        <div>
+          <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Tên đăng nhập</label>
+          <input id="swalAdminUsername" class="swal2-input" value="${esc(username)}" style="margin:0;width:100%" />
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Mật khẩu mới</label>
+          <input id="swalAdminPassword" type="password" class="swal2-input" placeholder="Để trống nếu không đổi" style="margin:0;width:100%" />
+        </div>
+        ${canEditQuota ? `<div>
+          <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Giới hạn cookie</label>
+          <input id="swalAdminCookieQuota" type="number" min="1" max="50" class="swal2-input" value="${cookieQuota || 5}" style="margin:0;width:100%" />
+        </div>` : ""}
+      </div>`,
+    focusConfirm: false,
+    showCancelButton: true,
+    confirmButtonText: "Lưu",
+    cancelButtonText: "Hủy",
+    confirmButtonColor: "#16a34a",
+    preConfirm: () => {
+      const nextUsername = document.getElementById("swalAdminUsername").value.trim();
+      const nextPassword = document.getElementById("swalAdminPassword").value;
+      const nextQuota = canEditQuota ? parseInt(document.getElementById("swalAdminCookieQuota").value || "5") || 5 : undefined;
+      if (!nextUsername) {
+        Swal.showValidationMessage("Tên đăng nhập không được để trống");
+        return false;
+      }
+      return { username: nextUsername, password: nextPassword, cookie_quota: nextQuota };
+    }
+  });
+  if (!result.isConfirmed) return;
+  const payload = { username: result.value.username };
+  if (result.value.password) payload.password = result.value.password;
+  if (canEditQuota) payload.cookie_quota = result.value.cookie_quota;
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { sAlert(data.error || "Không thể cập nhật user"); return; }
+  loadAdminUsers();
+}
 async function adminSetPlan(id, days) {
   if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
   await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });

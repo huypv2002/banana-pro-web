@@ -301,6 +301,13 @@ async function adminUpdateUser(request, env, path) {
   if (target.username === SUPER_ADMIN_USERNAME && actor.username !== SUPER_ADMIN_USERNAME) return err("Không thể sửa super admin", 403);
   const body = await request.json();
   const sets = [], vals = [];
+  if (body.username !== undefined) {
+    const nextUsername = String(body.username || "").trim();
+    if (!nextUsername) return err("Tên đăng nhập không được để trống");
+    if (target.username === SUPER_ADMIN_USERNAME && nextUsername !== SUPER_ADMIN_USERNAME) return err("Không thể đổi tên tài khoản chủ hệ thống", 403);
+    sets.push("username=?");
+    vals.push(nextUsername);
+  }
   if (body.role !== undefined) { sets.push("role=?"); vals.push(body.role === "super_admin" ? "admin" : body.role); }
   if (body.disabled !== undefined) { sets.push("disabled=?"); vals.push(body.disabled ? 1 : 0); }
   if (body.password) { sets.push("password_hash=?"); vals.push(await sha256(body.password)); }
@@ -321,7 +328,12 @@ async function adminUpdateUser(request, env, path) {
   }
   if (!sets.length) return err("Không có gì để cập nhật");
   vals.push(id);
-  await env.DB.prepare(`UPDATE users SET ${sets.join(",")} WHERE id=?`).bind(...vals).run();
+  try {
+    await env.DB.prepare(`UPDATE users SET ${sets.join(",")} WHERE id=?`).bind(...vals).run();
+  } catch (errUpdate) {
+    if (errUpdate.message?.includes("UNIQUE")) return err("Tên đăng nhập đã tồn tại");
+    return err(errUpdate.message || "Lỗi cập nhật user", 500);
+  }
   return json({ ok: true });
 }
 

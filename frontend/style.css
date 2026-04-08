@@ -35,10 +35,10 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .field-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .field-row > label { font-size: 0.8rem; font-weight: 600; }
 .input-btn-row { display: flex; gap: 6px; align-items: center; }
-.input-btn-row input[type="text"] { flex: 1; min-width: 0; }
+.input-btn-row input[type="text"], .input-btn-row input[type="password"] { flex: 1; min-width: 0; }
 .input-note { font-size: 0.77rem; color: var(--muted); }
 
-input[type="text"], input[type="number"], textarea, select {
+input[type="text"], input[type="password"], input[type="number"], textarea, select {
   background: #fff; border: 1px solid #d0d7e2; border-radius: 10px;
   color: var(--text); padding: 8px 11px; font-size: 0.84rem; outline: none;
   transition: border-color .2s; width: 100%; font-family: inherit;

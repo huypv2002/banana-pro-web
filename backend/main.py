@@ -318,9 +318,18 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 ordered.append(r)
                         job["images"] = ordered
 
-        # Launch workers with staggered start (3s delay between each)
+        # Shared concurrency rule for image/video:
+        # 1 output per prompt => 3 workers per cookie
+        # 2 outputs per prompt => 2 workers per cookie
+        # 3-4 outputs per prompt => 1 worker per cookie
         threads = []
-        num_workers = min(max(1, variants * len(cookie_dicts)), total)
+        if variants <= 1:
+            workers_per_cookie = 3
+        elif variants == 2:
+            workers_per_cookie = 2
+        else:
+            workers_per_cookie = 1
+        num_workers = min(max(1, workers_per_cookie * len(cookie_dicts)), total)
         for w in range(num_workers):
             t = threading.Thread(target=worker, args=(w, make_client(w)), daemon=True)
             threads.append(t)
