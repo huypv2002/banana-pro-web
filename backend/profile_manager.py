@@ -4,9 +4,10 @@ Quản lý Chrome profiles cho reCAPTCHA token trên VPS.
 - Tạo/xóa profiles
 - Mở Chrome để đăng nhập labs.google
 - Mở Chrome để cài extension (VPN, v.v.)
+- Import file txt dạng email|password để tự tạo profile + auto login tuần tự
 - Path đồng bộ với main.py (PROFILES_DIR env)
 """
-import json, os, shutil, subprocess, sys
+import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -14,8 +15,10 @@ from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QMessageBox,
+    QLabel, QLineEdit, QMessageBox, QFileDialog,
 )
+
+from chrome_cdp_cookie import ChromeCDPSession
 
 # ── Config — PHẢI khớp với main.py ───────────────────────────────────────────
 PROFILES_DIR = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
@@ -55,6 +58,20 @@ def save_profile_info(profile_path, email="", status="active"):
     (Path(profile_path) / ".profile_info.json").write_text(
         json.dumps({"email": email, "status": status}, ensure_ascii=False), encoding="utf-8")
 
+
+def parse_accounts_file(file_path: str):
+    accounts = []
+    raw = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+    for line_no, line in enumerate(raw.splitlines(), 1):
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        parts = [p.strip() for p in text.split("|")]
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"Dòng {line_no} không đúng định dạng email | mật khẩu")
+        accounts.append((parts[0], parts[1]))
+    return accounts
+
 # ── Chrome Thread ─────────────────────────────────────────────────────────────
 class ChromeThread(QThread):
     finished = Signal(str)
@@ -90,6 +107,56 @@ class ChromeThread(QThread):
             pass
         self.finished.emit(self.profile_name)
 
+
+class BatchLoginThread(QThread):
+    log = Signal(str)
+    progress = Signal(str)
+    finished = Signal(int, int)
+
+    def __init__(self, accounts):
+        super().__init__()
+        self.accounts = accounts
+
+    def run(self):
+        success = 0
+        failed = 0
+        total = len(self.accounts)
+        for idx, (email, password) in enumerate(self.accounts, 1):
+            profile_path = Path(PROFILES_DIR) / email
+            profile_path.mkdir(parents=True, exist_ok=True)
+            save_profile_info(str(profile_path), email=email, status="processing")
+            self.progress.emit(f"[{idx}/{total}] Đang xử lý {email}")
+            session = None
+            try:
+                self.log.emit(f"▶ [{idx}/{total}] Tạo hoặc dùng lại profile: {email}")
+                session = ChromeCDPSession(
+                    profile_path=str(profile_path),
+                    headless=False,
+                    chrome_path=CHROME_PATH,
+                    log_fn=lambda msg, mail=email: self.log.emit(f"{mail}: {msg}"),
+                )
+                cookies = session.extract_cookies(email=email, password=password, force_login=True)
+                if cookies:
+                    save_profile_info(str(profile_path), email=email, status="active")
+                    self.log.emit(f"✅ {email}: đăng nhập xong, đã lưu cookies")
+                    success += 1
+                else:
+                    save_profile_info(str(profile_path), email=email, status="failed")
+                    self.log.emit(f"❌ {email}: không lấy được cookies")
+                    failed += 1
+            except Exception as ex:
+                save_profile_info(str(profile_path), email=email, status="failed")
+                self.log.emit(f"❌ {email}: lỗi {str(ex)[:160]}")
+                failed += 1
+            finally:
+                if session:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+                time.sleep(2)
+        self.finished.emit(success, failed)
+
 # ── Main Window ───────────────────────────────────────────────────────────────
 BTN_STYLE = {
     "green":  "QPushButton{background:#16a34a;color:#fff;border:none;border-radius:6px;padding:0 12px;font-weight:bold;font-size:12px;} QPushButton:hover{background:#15803d;} QPushButton:disabled{background:#94a3b8;}",
@@ -102,8 +169,10 @@ class ProfileManager(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("🍌 Banana Pro - Chrome Profile Manager")
-        self.setMinimumSize(860, 520)
+        self.setMinimumSize(980, 620)
         self.threads = {}  # name → ChromeThread
+        self.batch_thread = None
+        self.accounts_file = ""
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -140,10 +209,30 @@ class ProfileManager(QMainWindow):
             tb.addWidget(btn)
         layout.addLayout(tb)
 
+        batch_bar = QHBoxLayout()
+        self.file_input = QLineEdit()
+        self.file_input.setPlaceholderText("Chọn file .txt dạng email | mật khẩu")
+        self.file_input.setReadOnly(True)
+        batch_bar.addWidget(self.file_input, 1)
+
+        btn_pick = QPushButton("📄 Chọn file")
+        btn_pick.setFixedHeight(34)
+        btn_pick.setStyleSheet(BTN_STYLE["blue"])
+        btn_pick.clicked.connect(self.pick_accounts_file)
+        batch_bar.addWidget(btn_pick)
+
+        self.btn_batch = QPushButton("🚀 Tự động đăng nhập")
+        self.btn_batch.setFixedHeight(34)
+        self.btn_batch.setStyleSheet(BTN_STYLE["green"])
+        self.btn_batch.clicked.connect(self.start_batch_login)
+        batch_bar.addWidget(self.btn_batch)
+        layout.addLayout(batch_bar)
+
         # Info box
         info = QLabel(
             "💡 <b>Mở Chrome (Login)</b>: đăng nhập labs.google → đóng Chrome → backend tự dùng cookies\n"
-            "💡 <b>Mở Chrome (Extension)</b>: cài VPN/extension → đóng Chrome → extension được lưu vào profile"
+            "💡 <b>Mở Chrome (Extension)</b>: cài VPN/extension → đóng Chrome → extension được lưu vào profile\n"
+            "💡 <b>Tự động đăng nhập</b>: chọn file txt dạng <code>email | mật khẩu</code>, hệ thống sẽ mở từng Chrome thật, đăng nhập xong mới sang profile tiếp theo"
         )
         info.setStyleSheet("background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;font-size:12px;color:#1e40af;")
         info.setWordWrap(True)
@@ -250,6 +339,42 @@ class ProfileManager(QMainWindow):
         self.name_input.clear()
         self.refresh_table()
         self.set_status(f"✅ Đã tạo profile: {name}  →  {path}")
+
+    def pick_accounts_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn file tài khoản", "", "Text Files (*.txt);;All Files (*)")
+        if not path:
+            return
+        self.accounts_file = path
+        self.file_input.setText(path)
+
+    def start_batch_login(self):
+        if self.batch_thread and self.batch_thread.isRunning():
+            QMessageBox.information(self, "Đang chạy", "Tiến trình tự động đăng nhập đang chạy.")
+            return
+        if not self.accounts_file:
+            QMessageBox.warning(self, "Thiếu file", "Chọn file .txt dạng email | mật khẩu trước.")
+            return
+        try:
+            accounts = parse_accounts_file(self.accounts_file)
+        except Exception as ex:
+            QMessageBox.warning(self, "File không hợp lệ", str(ex))
+            return
+        if not accounts:
+            QMessageBox.warning(self, "File rỗng", "Không tìm thấy tài khoản hợp lệ trong file.")
+            return
+        self.btn_batch.setEnabled(False)
+        self.batch_thread = BatchLoginThread(accounts)
+        self.batch_thread.log.connect(self.set_status)
+        self.batch_thread.progress.connect(self.set_status)
+        self.batch_thread.finished.connect(self.on_batch_finished)
+        self.batch_thread.start()
+        self.set_status(f"🚀 Bắt đầu tự động đăng nhập {len(accounts)} tài khoản...")
+
+    def on_batch_finished(self, success, failed):
+        self.btn_batch.setEnabled(True)
+        self.refresh_table()
+        self.set_status(f"✅ Hoàn tất tự động đăng nhập | Thành công: {success} | Thất bại: {failed}")
+        QMessageBox.information(self, "Hoàn tất", f"Tự động đăng nhập xong.\nThành công: {success}\nThất bại: {failed}")
 
     def open_chrome(self, name, path, mode):
         if name in self.threads: return
