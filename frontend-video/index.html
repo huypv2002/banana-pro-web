@@ -18,7 +18,7 @@
       <button class="login-tab active" onclick="switchAuthTab('login')">Đăng nhập</button>
       <button class="login-tab" onclick="switchAuthTab('register')">Đăng ký</button>
     </div>
-    <form onsubmit="return handleAuth(event)">
+    <form onsubmit="event.preventDefault(); return window.handleAuth ? handleAuth(event) : false">
       <input type="text" id="authUsername" placeholder="Tên đăng nhập" required autocomplete="username"/>
       <input type="password" id="authPassword" placeholder="Mật khẩu" required autocomplete="current-password"/>
       <button type="submit" class="login-btn" id="authSubmitBtn">Đăng nhập</button>
