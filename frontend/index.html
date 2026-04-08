@@ -207,7 +207,8 @@
     <div class="admin-shell">
       <aside class="admin-sidebar">
         <div class="admin-sidebar-head">
-          <div class="admin-sidebar-title">Bảng điều hành</div>
+          <div class="admin-sidebar-kicker">Trung tâm điều hành</div>
+          <div class="admin-sidebar-title">Quản trị Banana Pro Ảnh</div>
           <div class="admin-sidebar-meta" id="adminWorkspaceMeta">Đang đồng bộ dữ liệu quản trị...</div>
         </div>
         <div class="admin-sidebar-nav">
@@ -217,46 +218,89 @@
           <button class="admin-side-link" id="adminNavCookies" onclick="switchAdminSection('cookies')">Kho cookie</button>
           <button class="admin-side-link" id="adminNavHistory" onclick="switchAdminSection('history')">Lịch sử hệ thống</button>
         </div>
-        <div class="admin-summary-list" id="adminSummaryList">
-          <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
+        <div class="admin-side-card">
+          <div class="admin-side-card-label">Phạm vi</div>
+          <div class="admin-side-card-value">Ảnh, người dùng, gói, cookie và lịch sử</div>
         </div>
       </aside>
 
       <div class="admin-content">
+        <div class="admin-topbar">
+          <div>
+            <div class="admin-topbar-kicker">Khu quản trị</div>
+            <h2 id="adminViewTitle">Tổng quan vận hành</h2>
+            <p id="adminViewSubtitle">Theo dõi nhanh người dùng, gói, cookie và lịch sử tạo ảnh trong cùng một không gian làm việc.</p>
+          </div>
+          <div class="admin-topbar-meta">
+            <div class="admin-topbar-chip">Bản ảnh</div>
+            <div class="admin-topbar-chip" id="adminViewChip">Đang tải dữ liệu</div>
+          </div>
+        </div>
+
         <section class="admin-pane" id="adminPaneOverview">
-          <section class="admin-stats" id="adminStats">
-            <article class="admin-stat-card">
-              <span class="admin-stat-label">Tổng tài khoản</span>
-              <strong class="admin-stat-value" id="adminStatUsers">0</strong>
-              <span class="admin-stat-note">Toàn bộ tài khoản đang có trong hệ thống</span>
-            </article>
-            <article class="admin-stat-card">
-              <span class="admin-stat-label">Gói đang hoạt động</span>
-              <strong class="admin-stat-value" id="adminStatPlans">0</strong>
-              <span class="admin-stat-note">Bao gồm tài khoản còn hạn và không giới hạn</span>
-            </article>
-            <article class="admin-stat-card">
-              <span class="admin-stat-label">Tài khoản bị khóa</span>
-              <strong class="admin-stat-value" id="adminStatLocked">0</strong>
-              <span class="admin-stat-note">Cần kiểm tra hoặc mở lại khi cần thiết</span>
-            </article>
-            <article class="admin-stat-card">
-              <span class="admin-stat-label">Lượt tạo gần đây</span>
-              <strong class="admin-stat-value" id="adminStatHistory">0</strong>
-              <span class="admin-stat-note">Số bản ghi đang hiển thị trong khu lịch sử</span>
-            </article>
-          </section>
-          <section class="admin-section admin-history-section">
-            <div class="admin-section-head">
-              <div>
-                <h3>Lịch sử toàn hệ thống</h3>
-                <p>Theo dõi các lượt tạo gần đây để kiểm tra chất lượng vận hành và tần suất sử dụng.</p>
-              </div>
+          <div class="admin-overview-grid">
+            <div class="admin-overview-main">
+              <section class="admin-stats" id="adminStats">
+                <article class="admin-stat-card">
+                  <span class="admin-stat-label">Tổng tài khoản</span>
+                  <strong class="admin-stat-value" id="adminStatUsers">0</strong>
+                  <span class="admin-stat-note">Toàn bộ tài khoản hiện có trong hệ thống.</span>
+                </article>
+                <article class="admin-stat-card">
+                  <span class="admin-stat-label">Gói đang hoạt động</span>
+                  <strong class="admin-stat-value" id="adminStatPlans">0</strong>
+                  <span class="admin-stat-note">Tài khoản còn hạn hoặc có quyền không giới hạn.</span>
+                </article>
+                <article class="admin-stat-card">
+                  <span class="admin-stat-label">Tài khoản bị khóa</span>
+                  <strong class="admin-stat-value" id="adminStatLocked">0</strong>
+                  <span class="admin-stat-note">Danh sách cần kiểm tra hoặc mở lại khi cần.</span>
+                </article>
+                <article class="admin-stat-card">
+                  <span class="admin-stat-label">Lượt tạo gần đây</span>
+                  <strong class="admin-stat-value" id="adminStatHistory">0</strong>
+                  <span class="admin-stat-note">Số bản ghi đang hiển thị ở bảng vận hành.</span>
+                </article>
+              </section>
+              <section class="admin-section admin-history-section">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Lượt tạo mới nhất</h3>
+                    <p>Kiểm tra nhanh các lượt sinh ảnh gần đây để rà lỗi, chất lượng và nhịp sử dụng hệ thống.</p>
+                  </div>
+                </div>
+                <div id="adminHistoryGrid" class="results-grid admin-history-grid">
+                  <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
+                </div>
+              </section>
             </div>
-            <div id="adminHistoryGrid" class="results-grid admin-history-grid">
-              <div class="empty-state"><div class="empty-icon">📜</div><div>Chưa có lịch sử</div></div>
-            </div>
-          </section>
+            <aside class="admin-overview-side">
+              <section class="admin-section admin-section-tight">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Điểm cần chú ý</h3>
+                    <p>Các tín hiệu vận hành cần theo dõi trong ngày.</p>
+                  </div>
+                </div>
+                <div class="admin-summary-list" id="adminSummaryList">
+                  <div class="admin-summary-item"><span>Đang tải dữ liệu người dùng...</span></div>
+                </div>
+              </section>
+              <section class="admin-section admin-section-tight">
+                <div class="admin-section-head">
+                  <div>
+                    <h3>Nhịp làm việc</h3>
+                    <p>Khi có sự cố, ưu tiên kiểm tra theo đúng thứ tự để xử lý nhanh hơn.</p>
+                  </div>
+                </div>
+                <div class="admin-ops-list">
+                  <div class="admin-ops-item"><strong>1</strong><span>Kiểm tra cookie lỗi hoặc quá cũ.</span></div>
+                  <div class="admin-ops-item"><strong>2</strong><span>Đối chiếu gói và trạng thái tài khoản.</span></div>
+                  <div class="admin-ops-item"><strong>3</strong><span>Mở lịch sử theo người dùng để truy vết batch gây lỗi.</span></div>
+                </div>
+              </section>
+            </aside>
+          </div>
         </section>
 
         <section class="admin-pane" id="adminPaneUsers" style="display:none">
@@ -272,7 +316,7 @@
                 </div>
                 <div class="admin-table-wrap">
                   <table class="cookie-table admin-user-table" id="adminUserTable">
-                    <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+                    <thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Giới hạn cookie</th><th>Gói</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
                     <tbody id="adminUserBody"></tbody>
                   </table>
                 </div>
@@ -293,6 +337,7 @@
                     <option value="user">Người dùng</option>
                     <option value="admin">Quản trị viên</option>
                   </select>
+                  <input type="number" id="adminNewCookieQuota" min="1" max="50" value="5" placeholder="Giới hạn cookie"/>
                   <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
                 </div>
               </div>
@@ -409,6 +454,7 @@
         → vào <a href="https://labs.google" target="_blank">labs.google</a> → đăng nhập → Export → Copy
       </div>
       <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#92400e;margin-top:8px">⚠️ Cookie chỉ có hạn <b>10–24 giờ</b>. Nhớ kiểm tra và lấy cookie mới trước khi tạo ảnh!</div>
+      <div id="cookieQuotaInfo" style="margin-top:8px;font-size:0.8rem;color:var(--muted)">Đang tải giới hạn cookie...</div>
       <div class="field-row" style="margin-top:12px">
         <label>Thêm cookie mới</label>
         <textarea id="newCookieInput" rows="4" placeholder="Dán cookie JSON hoặc string name=value; ..."></textarea>

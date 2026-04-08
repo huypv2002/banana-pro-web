@@ -287,9 +287,16 @@ function refreshRefCells() {
 
 // ── Cookies ──
 async function loadCookiesFromDB() { try { const res = await apiFetch("/user/cookies"); if (res.ok) cookies = await res.json(); renderCookieTable(); } catch (e) {} }
+function updateCookieQuotaInfo() {
+  const info = document.getElementById("cookieQuotaInfo");
+  if (!info) return;
+  const quota = cookies[0]?.cookie_quota ?? authUser?.cookie_quota ?? 5;
+  info.textContent = `Đang dùng ${cookies.length}/${quota} cookie cho tài khoản này.`;
+}
 function renderCookieTable() {
   const tbody = document.getElementById("cookieTableBody");
   tbody.innerHTML = cookies.map((c, i) => `<tr><td>${i + 1}</td><td style="font-family:monospace;font-size:0.75rem">${esc((c.cookie_hash||"").slice(0,12))}...</td><td>${esc(c.email || "—")}</td><td>${c.status}</td><td><button class="btn btn-red btn-sm" onclick="deleteCookie(${c.id})">Xóa</button></td></tr>`).join("") || '<tr><td colspan="5" style="text-align:center;padding:12px">Chưa có cookie</td></tr>';
+  updateCookieQuotaInfo();
 }
 function parseCookieInput(raw) { try { const arr = JSON.parse(raw); if (Array.isArray(arr)) { const o = {}; arr.forEach(c => { if (c.name && c.value) o[c.name] = c.value; }); return o; } } catch(e) {} const o = {}; raw.split(";").forEach(p => { const [k,...v] = p.split("="); if (k?.trim()) o[k.trim()] = v.join("=").trim(); }); return o; }
 async function addCookie() {
@@ -945,6 +952,9 @@ async function loadAdminUsers() {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
       const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
+      const quotaControl = authUser?.role === "super_admin"
+        ? `<input type="number" min="1" max="50" value="${u.cookie_quota ?? 5}" onchange="adminSetCookieQuota(${u.id}, this.value)" style="width:84px"/>`
+        : `<span>${u.cookie_quota ?? 5}</span>`;
       return `<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td>
       <td><select onchange="adminChangeRole(${u.id},this.value)" ${u.username === "adminveo" ? "disabled" : ""}>
@@ -952,6 +962,7 @@ async function loadAdminUsers() {
         <option value="admin" ${u.role === "admin" ? "selected" : ""}>Quản trị viên</option>
         <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Chủ hệ thống</option>
       </select></td>
+      <td>${quotaControl}</td>
       <td><span class="${planClass}">${planText}</span>
         ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
@@ -960,10 +971,10 @@ async function loadAdminUsers() {
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem;color:var(--error)" onclick="adminSetPlan(${u.id},0)">Hủy</button>
         </div>` : ""}
       </td>
-      <td>${u.disabled ? '<span class="status-err">Khóa</span>' : '<span class="status-ok">OK</span>'}</td>
+      <td>${u.disabled ? '<span class="status-err">Đã khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
       <td>
-        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "🔓" : "🔒"}</button>
-        ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">🗑</button>` : ""}
+        <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "Mở khóa" : "Khóa"}</button>
+        ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
       </td>
     </tr>`;
     }).join("");
@@ -1020,12 +1031,14 @@ async function adminAddUser() {
   const username = document.getElementById("adminNewUser").value.trim();
   const password = document.getElementById("adminNewPass").value;
   const role = document.getElementById("adminNewRole").value;
+  const cookieQuota = parseInt(document.getElementById("adminNewCookieQuota")?.value || "5") || 5;
   if (!username || !password) { sAlert("Thiếu username/password"); return; }
-  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role }) });
+  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota }) });
   const data = await res.json();
   if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("adminNewUser").value = "";
   document.getElementById("adminNewPass").value = "";
+  if (document.getElementById("adminNewCookieQuota")) document.getElementById("adminNewCookieQuota").value = "5";
   loadAdminUsers();
 }
 
@@ -1035,6 +1048,11 @@ async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return
 async function adminSetPlan(id, days) {
   if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
   await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  loadAdminUsers();
+}
+
+async function adminSetCookieQuota(id, quota) {
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ cookie_quota: parseInt(quota) || 1 }) });
   loadAdminUsers();
 }
 
@@ -1075,6 +1093,17 @@ function switchAdminSection(section) {
     document.getElementById(`adminPane${key.charAt(0).toUpperCase() + key.slice(1)}`).style.display = key === section ? "" : "none";
     document.getElementById(`adminNav${key.charAt(0).toUpperCase() + key.slice(1)}`)?.classList.toggle("active", key === section);
   });
+  const headerMap = {
+    overview: ["Tổng quan vận hành", "Theo dõi nhanh người dùng, gói, cookie và lịch sử tạo video trong cùng một không gian làm việc.", "Bức tranh toàn hệ thống"],
+    users: ["Quản lý người dùng", "Kiểm soát vai trò, trạng thái tài khoản và thông tin đăng nhập ngay trong một khu làm việc rõ ràng.", "Tài khoản và phân quyền"],
+    plans: ["Quản lý gói dịch vụ", "Gia hạn, hủy hoặc kiểm tra trạng thái gói của từng tài khoản mà không phải chuyển màn hình.", "Gói và thời hạn"],
+    cookies: ["Quản lý kho cookie", "Theo dõi cookie theo từng tài khoản để rà lỗi nhanh và giữ nguồn chạy video luôn sẵn sàng.", "Cookie theo tài khoản"],
+    history: ["Lịch sử toàn hệ thống", "Mở lịch sử theo từng người dùng, từng batch và từng file để truy vết chính xác hơn.", "Lịch sử theo thư mục"],
+  };
+  const [title, subtitle, chip] = headerMap[section] || headerMap.overview;
+  document.getElementById("adminViewTitle").textContent = title;
+  document.getElementById("adminViewSubtitle").textContent = subtitle;
+  document.getElementById("adminViewChip").textContent = chip;
   if (section === "overview" || section === "users" || section === "plans") loadAdminUsers();
   if (section === "overview") loadAdminHistory();
   if (section === "cookies") loadAdminCookieUsers();

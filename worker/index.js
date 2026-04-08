@@ -67,8 +67,9 @@ export default {
 async function handleGenerate(request, env, vpsPath = "/generate") {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureUserSchema(env);
   // Check plan
-  const u = await env.DB.prepare("SELECT role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
+  const u = await env.DB.prepare("SELECT role,plan_expires_at,cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
   if (getEffectiveRole({ username: user.username, role: u.role }) !== "super_admin") {
     if (!u.plan_expires_at || u.plan_expires_at < new Date().toISOString())
       return err("Gói của bạn đã hết hạn. Vui lòng liên hệ admin để gia hạn.", 403);
@@ -76,9 +77,10 @@ async function handleGenerate(request, env, vpsPath = "/generate") {
   const body = await request.json();
   // If no cookie in body, inject from D1
   if (!body.cookie) {
-    const raw = await getUserCookieRaw(env, user.user_id);
-    if (!raw) return err("Chưa có cookie nào. Vui lòng thêm cookie trước.");
-    body.cookie = raw;
+    const cookiePool = await getUserCookiePool(env, user.user_id, u.cookie_quota);
+    if (!cookiePool.length) return err("Chưa có cookie nào. Vui lòng thêm cookie trước.");
+    body.cookie = cookiePool[0];
+    body.cookie_pool = cookiePool;
   }
   // Proxy to VPS
   try {
@@ -105,11 +107,13 @@ async function handleGenerate(request, env, vpsPath = "/generate") {
 async function handleRecaptchaToken(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureUserSchema(env);
   const body = await request.json();
   if (!body.cookie) {
-    const raw = await getUserCookieRaw(env, user.user_id);
-    if (!raw) return err("Chưa có cookie nào. Vui lòng thêm cookie trước.");
-    body.cookie = raw;
+    const u = await env.DB.prepare("SELECT cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
+    const cookiePool = await getUserCookiePool(env, user.user_id, u?.cookie_quota);
+    if (!cookiePool.length) return err("Chưa có cookie nào. Vui lòng thêm cookie trước.");
+    body.cookie = cookiePool[0];
   }
   try {
     const resp = await fetch(VPS + "/recaptcha-token", {
@@ -238,11 +242,12 @@ async function handleLogout(request, env) {
 async function handleMe(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
-  const u = await env.DB.prepare("SELECT username,role,plan_expires_at FROM users WHERE id=?").bind(user.user_id).first();
+  await ensureUserSchema(env);
+  const u = await env.DB.prepare("SELECT username,role,plan_expires_at,cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
   const now = new Date().toISOString();
   const effectiveRole = getEffectiveRole(u);
   const planActive = ["admin", "super_admin"].includes(effectiveRole) || (u.plan_expires_at && u.plan_expires_at > now);
-  return json({ username: u.username, role: effectiveRole, plan_expires_at: u.plan_expires_at, plan_active: planActive });
+  return json({ username: u.username, role: effectiveRole, plan_expires_at: u.plan_expires_at, plan_active: planActive, cookie_quota: u.cookie_quota ?? 5 });
 }
 
 async function handleChangePassword(request, env) {
@@ -264,18 +269,21 @@ async function handleChangePassword(request, env) {
 async function adminListUsers(request, env) {
   const [, e] = await requireAdmin(request, env);
   if (e) return e;
-  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at FROM users ORDER BY id").all();
+  await ensureUserSchema(env);
+  const { results } = await env.DB.prepare("SELECT id,username,role,disabled,plan_expires_at,created_at,cookie_quota FROM users ORDER BY id").all();
   return json(results.map(user => ({ ...user, role: getEffectiveRole(user) })));
 }
 
 async function adminCreateUser(request, env) {
-  const [, e] = await requireAdmin(request, env);
+  const [actor, e] = await requireAdmin(request, env);
   if (e) return e;
-  const { username, password, role } = await request.json();
+  await ensureUserSchema(env);
+  const { username, password, role, cookie_quota } = await request.json();
   if (!username || !password) return err("Thiếu username/password");
   const hash = await sha256(password);
+  const quota = Math.max(1, Math.min(50, parseInt(cookie_quota ?? 5) || 5));
   try {
-    await env.DB.prepare("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)").bind(username, hash, role || "user").run();
+    await env.DB.prepare("INSERT INTO users(username,password_hash,role,cookie_quota) VALUES(?,?,?,?)").bind(username, hash, role || "user", getEffectiveRole(actor) === "super_admin" ? quota : 5).run();
     return json({ ok: true });
   } catch (e) {
     if (e.message?.includes("UNIQUE")) return err("Username đã tồn tại");
@@ -286,6 +294,7 @@ async function adminCreateUser(request, env) {
 async function adminUpdateUser(request, env, path) {
   const [actor, e] = await requireAdmin(request, env);
   if (e) return e;
+  await ensureUserSchema(env);
   const id = parseInt(path.split("/").pop());
   const target = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(id).first();
   if (!target) return err("User không tồn tại", 404);
@@ -295,6 +304,11 @@ async function adminUpdateUser(request, env, path) {
   if (body.role !== undefined) { sets.push("role=?"); vals.push(body.role === "super_admin" ? "admin" : body.role); }
   if (body.disabled !== undefined) { sets.push("disabled=?"); vals.push(body.disabled ? 1 : 0); }
   if (body.password) { sets.push("password_hash=?"); vals.push(await sha256(body.password)); }
+  if (body.cookie_quota !== undefined) {
+    if (getEffectiveRole(actor) !== "super_admin") return err("Chỉ chủ hệ thống mới được đổi giới hạn cookie", 403);
+    sets.push("cookie_quota=?");
+    vals.push(Math.max(1, Math.min(50, parseInt(body.cookie_quota) || 1)));
+  }
   if (body.plan_days !== undefined) {
     if (body.plan_days <= 0) { sets.push("plan_expires_at=NULL"); }
     else {
@@ -462,17 +476,24 @@ async function adminDeleteCookie(request, env, path) {
 async function getUserCookies(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureUserSchema(env);
+  const info = await env.DB.prepare("SELECT cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
   const { results } = await env.DB.prepare(
     "SELECT id,cookie_hash,email,status,created_at FROM user_cookies WHERE user_id=? ORDER BY id"
   ).bind(user.user_id).all();
-  return json(results);
+  return json(results.map(item => ({ ...item, cookie_quota: info?.cookie_quota ?? 5 })));
 }
 
 async function addUserCookie(request, env) {
   const [user, e] = await requireUser(request, env);
   if (e) return e;
+  await ensureUserSchema(env);
   const { cookie_raw, cookie_hash, email, status } = await request.json();
   if (!cookie_raw || !cookie_hash) return err("Thiếu cookie");
+  const info = await env.DB.prepare("SELECT cookie_quota FROM users WHERE id=?").bind(user.user_id).first();
+  const countRow = await env.DB.prepare("SELECT COUNT(*) as count FROM user_cookies WHERE user_id=?").bind(user.user_id).first();
+  const quota = info?.cookie_quota ?? 5;
+  if ((countRow?.count || 0) >= quota) return err(`Tài khoản chỉ được lưu tối đa ${quota} cookie`);
   try {
     await env.DB.prepare(
       "INSERT INTO user_cookies(user_id,cookie_raw,cookie_hash,email,status) VALUES(?,?,?,?,?)"
@@ -609,12 +630,17 @@ async function saveHistory(request, env) {
   return json({ ok: true, saved: items.length });
 }
 
-// ── Get cookie raw for generate (internal) ──
-async function getUserCookieRaw(env, user_id) {
-  const row = await env.DB.prepare(
-    "SELECT cookie_raw FROM user_cookies WHERE user_id=? AND status!='error' ORDER BY id LIMIT 1"
-  ).bind(user_id).first();
-  return row?.cookie_raw || null;
+async function ensureUserSchema(env) {
+  try { await env.DB.prepare("ALTER TABLE users ADD COLUMN cookie_quota INTEGER DEFAULT 5").run(); } catch (e) {}
+  try { await env.DB.prepare("UPDATE users SET cookie_quota=20 WHERE username=?").bind(SUPER_ADMIN_USERNAME).run(); } catch (e) {}
+}
+
+// ── Get cookie pool for generate (internal) ──
+async function getUserCookiePool(env, user_id, quota = 5) {
+  const { results } = await env.DB.prepare(
+    "SELECT cookie_raw FROM user_cookies WHERE user_id=? AND status!='error' ORDER BY CASE WHEN status='ok' THEN 0 ELSE 1 END, id LIMIT ?"
+  ).bind(user_id, Math.max(1, Math.min(50, parseInt(quota ?? 5) || 5))).all();
+  return results.map(row => row.cookie_raw).filter(Boolean);
 }
 
 // ── Proxy to VPS ─────────────────────────────────────────────────────────────

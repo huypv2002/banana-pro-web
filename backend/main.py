@@ -103,6 +103,7 @@ ASPECT_MAP = {
 
 class GenerateRequest(BaseModel):
     cookie: str
+    cookie_pool: List[str] = []
     prompts: List[str]
     model: str = "NARWHAL"
     aspect_ratio: str = "16:9"
@@ -153,20 +154,46 @@ def _extract_media_id(result: dict) -> str:
     return ""
 
 
+def _build_cookie_pool(primary_cookie: str, cookie_pool: list = None) -> List[dict]:
+    raw_items, seen = [], set()
+    for raw in [primary_cookie, *(cookie_pool or [])]:
+        text = (raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        raw_items.append(text)
+    parsed = []
+    for raw in raw_items:
+        cookies = _parse_cookie_input(raw)
+        if cookies:
+            parsed.append(cookies)
+    return parsed
+
+
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     model: str, aspect_ratio: str, variants: int,
                     resolution: str = "1k",
-                    reference_images: list = None, folder_images: dict = None):
+                    reference_images: list = None, folder_images: dict = None,
+                    cookie_pool: list = None):
     import threading, queue as _queue, random
     job = jobs[job_id]
     job["status"] = "running"
     logger.info(f"[{job_id}] prompts={len(prompts)}, variants={variants}, parallel={variants}, resolution={resolution}")
     try:
-        cookies = _parse_cookie_input(cookie)
-        if not cookies:
+        cookie_dicts = _build_cookie_pool(cookie, cookie_pool)
+        if not cookie_dicts:
             raise ValueError("Cookie không hợp lệ.")
+        all_profiles = get_all_profiles() or [None]
 
-        client = get_client_with_fallback(cookies)
+        def make_client(worker_idx: int):
+            cookie_dict = cookie_dicts[worker_idx % len(cookie_dicts)]
+            profile = all_profiles[worker_idx % len(all_profiles)]
+            c = LabsFlowClient(cookie_dict, profile_path=profile)
+            if c.fetch_access_token():
+                return c
+            return get_client_with_fallback(cookie_dict)
+
+        client = make_client(0)
         project_id = client.flow_project_id
         aspect = ASPECT_MAP.get(aspect_ratio, "IMAGE_ASPECT_RATIO_LANDSCAPE")
 
@@ -203,7 +230,8 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
 
         lock = threading.Lock()
 
-        def worker(worker_id):
+        def worker(worker_id, worker_client):
+            worker_project_id = worker_client.flow_project_id or project_id
             while not job.get("cancelled"):
                 try:
                     task_idx, pi, prompt, v = task_queue.get_nowait()
@@ -224,7 +252,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
                                     f.write(_b64.b64decode(data))
                                     tmp_path = f.name
-                                mid = client.upload_image(tmp_path)
+                                mid = worker_client.upload_image(tmp_path)
                                 os.unlink(tmp_path)
                                 if mid:
                                     image_inputs.append({"name": mid.strip(), "imageInputType": "IMAGE_INPUT_TYPE_REFERENCE"})
@@ -234,7 +262,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     request_item = {
                         "clientContext": {
                             "sessionId": f";{int(time.time() * 1000)}",
-                            "projectId": project_id,
+                            "projectId": worker_project_id,
                             "tool": "PINHOLE",
                             "userPaygateTier": "PAYGATE_TIER_TWO",
                         },
@@ -247,7 +275,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     if image_inputs:
                         request_item["imageInputs"] = image_inputs
 
-                    result = client.generate_flow_images([request_item], project_id=project_id)
+                    result = worker_client.generate_flow_images([request_item], project_id=worker_project_id)
                     if result:
                         url = _extract_image_url(result)
                         # Upsample if 2k/4k
@@ -259,7 +287,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                 up_ok = False
                                 for up_try in range(2):
                                     time.sleep(3)  # Delay to avoid rate limit after gen
-                                    up_result = client.upsample_image(media_id, target_resolution=target, project_id=project_id)
+                                    up_result = worker_client.upsample_image(media_id, target_resolution=target, project_id=worker_project_id)
                                     if up_result and up_result.get("encodedImage"):
                                         up_key = f"{job_id}_{task_idx}"
                                         upscaled_store[up_key] = (up_result["encodedImage"], time.time())
@@ -267,7 +295,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                         up_ok = True
                                         break
                                     else:
-                                        logger.warning(f"[{job_id}][w{worker_id}] Upscale attempt {up_try+1} failed: {client.last_error_detail}")
+                                        logger.warning(f"[{job_id}][w{worker_id}] Upscale attempt {up_try+1} failed: {worker_client.last_error_detail}")
                                         time.sleep(2)
                                 if not up_ok:
                                     logger.warning(f"[{job_id}][w{worker_id}] Upscale failed after retries, keeping 1K")
@@ -275,7 +303,7 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
                                              "upscaled": f"/upscaled/{job_id}_{task_idx}" if (resolution in ("2k","4k") and f"{job_id}_{task_idx}" in upscaled_store) else None}
                     else:
                         results[task_idx] = {"prompt": prompt, "url": None,
-                                             "error": client.last_error_detail or "Tạo ảnh thất bại"}
+                                             "error": worker_client.last_error_detail or "Tạo ảnh thất bại"}
                 except Exception as e:
                     results[task_idx] = {"prompt": prompt, "url": None, "error": str(e)}
                 finally:
@@ -292,9 +320,9 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
 
         # Launch workers with staggered start (3s delay between each)
         threads = []
-        num_workers = min(variants, total)
+        num_workers = min(max(1, variants * len(cookie_dicts)), total)
         for w in range(num_workers):
-            t = threading.Thread(target=worker, args=(w,), daemon=True)
+            t = threading.Thread(target=worker, args=(w, make_client(w)), daemon=True)
             threads.append(t)
             t.start()
             if w < num_workers - 1:
@@ -430,7 +458,7 @@ async def generate(req: GenerateRequest):
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _run_generation,
                          job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
-                         req.resolution, req.reference_images or [], req.folder_images or {})
+                         req.resolution, req.reference_images or [], req.folder_images or {}, req.cookie_pool or [])
 
     return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 
@@ -500,6 +528,7 @@ VIDEO_R2V_MODEL_MAP = {
 
 class VideoGenerateRequest(BaseModel):
     cookie: str = ""
+    cookie_pool: List[str] = []
     prompts: List[str]
     mode: str = "t2v"
     model: str = "t2v_fast_16_9"
@@ -514,6 +543,7 @@ class VideoGenerateRequest(BaseModel):
 
 class VideoFromImageRequest(BaseModel):
     cookie: str = ""
+    cookie_pool: List[str] = []
     prompts: List[str]
     image: str          # base64 data URL
     model: str = "fast_i2v"
@@ -535,7 +565,7 @@ async def generate_video(req: VideoGenerateRequest):
     loop.run_in_executor(executor, _run_video_generation,
                          job_id, req.cookie, req.prompts, req.mode, req.model,
                          req.num_videos, req.ref_images or {}, req.end_images or {},
-                         req.delay, req.workers)
+                         req.delay, req.workers, req.cookie_pool or [])
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 
@@ -621,7 +651,7 @@ def _generate_r2v(client, project_id: str, prompt: str, media_ids: list,
 def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                           mode: str, model: str, num_videos: int,
                           ref_images: dict = None, end_images: dict = None,
-                          delay: int = 3, workers: int = 3):
+                          delay: int = 3, workers: int = 3, cookie_pool: list = None):
     job = jobs[job_id]
     job["status"] = "running"
     ref_images = ref_images or {}
@@ -646,24 +676,27 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
     logger.info(f"[VIDEO {job_id}] mode={mode}, key={model_key}, prompts={len(prompts)}, workers={workers if mode=='t2v' else 1}, delay={delay}s")
 
     try:
-        cookies = _parse_cookie_input(cookie)
-        if not cookies:
+        cookie_dicts = _build_cookie_pool(cookie, cookie_pool)
+        if not cookie_dicts:
             raise ValueError("Cookie không hợp lệ.")
 
         # Tạo sẵn clients cho từng profile (dùng cho parallel T2V)
         all_profiles = get_all_profiles() or [None]
         # Client chính (profile đầu tiên thành công) — dùng cho sequential modes
-        main_client = get_client_with_fallback(cookies)
+        main_client = get_client_with_fallback(cookie_dicts[0])
         main_project_id = main_client.flow_project_id
         upload_cache = {}
 
         def make_client(worker_idx: int):
             """Tạo client cho worker, dùng profile round-robin."""
             profile = all_profiles[worker_idx % len(all_profiles)]
-            c = LabsFlowClient(cookies, profile_path=profile)
+            cookie_dict = cookie_dicts[worker_idx % len(cookie_dicts)]
+            c = LabsFlowClient(cookie_dict, profile_path=profile)
             if c.fetch_access_token():
                 return c
-            return main_client  # fallback
+            return get_client_with_fallback(cookie_dict)
+
+        workers = max(1, workers * len(cookie_dicts))
 
         def process_prompt(idx, prompt, client=None):
             """Xử lý 1 prompt, trả về result dict."""
@@ -712,7 +745,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
             except Exception as e:
                 return {"prompt": prompt, "urls": [], "error": str(e)}
 
-        if mode == "t2v" and workers > 1:
+        if workers > 1:
             # Parallel workers với nối đuôi (queue-based)
             import threading, queue as _queue
             num_w = max(1, min(workers, len(prompts)))
