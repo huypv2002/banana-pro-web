@@ -27,6 +27,7 @@ let adminSection = "overview";
 let adminHistoryMedia = "";
 let adminHistoryState = { userId: null, username: "", jobId: null, batchName: "", fileName: null };
 let adminCookieUserId = null;
+const autoDownloadedJobIds = new Set();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -439,6 +440,10 @@ let pollFailCount = 0;
 
 function startPolling(model) {
   pollFailCount = 0;
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
   pollInterval = setInterval(async () => {
     if (!currentJobId || paused) return;
     try {
@@ -459,6 +464,7 @@ function startPolling(model) {
       updateResultsFromJob(job);
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval);
+        pollInterval = null;
         const finishedJobId = currentJobId;
         currentJobId = null;
         setLoading(false);
@@ -479,13 +485,17 @@ function startPolling(model) {
           } : null).filter(Boolean);
           if (successItems.length) apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items: successItems }) }).catch(() => {});
           // Auto download ZIP
-          autoDownloadZip(job.images);
+          if (finishedJobId && !autoDownloadedJobIds.has(finishedJobId)) {
+            autoDownloadedJobIds.add(finishedJobId);
+            autoDownloadZip(job.images).catch(() => {});
+          }
         }
       }
     } catch (e) {
       pollFailCount++;
       if (pollFailCount >= 5) {
         clearInterval(pollInterval);
+        pollInterval = null;
         currentJobId = null;
         setLoading(false);
         showError("Mất kết nối tới server. Vui lòng thử lại.");
