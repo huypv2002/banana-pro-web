@@ -644,6 +644,18 @@ function populateResultsTable() {
   tbody.innerHTML = html;
 }
 
+function getActiveVideoSlots() {
+  const cookieCount = Math.max(1, cookies.length || 1);
+  const numVideos = parseInt(document.getElementById("numVideosInput")?.value || "1") || 1;
+  let workersPerCookie = 1;
+  if (currentMode === "t2v") {
+    if (numVideos <= 1) workersPerCookie = 3;
+    else if (numVideos === 2) workersPerCookie = 2;
+    else workersPerCookie = 1;
+  }
+  return Math.max(1, workersPerCookie * cookieCount);
+}
+
 function updateResults(job) {
   const batchFiles = getBatchFiles();
   const videos = job.videos || [];
@@ -664,15 +676,31 @@ function updateResults(job) {
       row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
     }
   });
-  // Mark running
+
+  // Reset untouched rows back to pending before marking running slots
+  const totalRows = batchFiles.flatMap(f => f.prompts).length;
+  for (let idx = 0; idx < totalRows; idx++) {
+    const row = document.getElementById(`resRow${idx}`);
+    if (!row || row.className === "row-done" || row.className === "row-error") continue;
+    row.className = "";
+    row.cells[statusCellIdx].innerHTML = "⏳ Chờ";
+    row.cells[videoCellIdx].innerHTML = "—";
+  }
+
+  // Mark all currently running rows based on the active parallel slots
   if (job.status === "running" && job.completed < job.total) {
-    const nextIdx = videos.findIndex(v => !v);
-    const row = document.getElementById(`resRow${nextIdx >= 0 ? nextIdx : job.completed}`);
-    if (row && row.className !== "row-done" && row.className !== "row-error") {
+    const runningSlots = Math.min(getActiveVideoSlots(), Math.max(0, job.total - job.completed));
+    const pendingIndexes = [];
+    for (let idx = 0; idx < job.total; idx++) {
+      if (!videos[idx]) pendingIndexes.push(idx);
+    }
+    pendingIndexes.slice(0, runningSlots).forEach((idx, pos) => {
+      const row = document.getElementById(`resRow${idx}`);
+      if (!row || row.className === "row-done" || row.className === "row-error") return;
       row.className = "row-running";
       row.cells[statusCellIdx].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
-      row.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+      if (pos === 0) row.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
   // Update batch table status
   let offset = 0;
@@ -952,7 +980,7 @@ async function loadAdminUsers() {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
       const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
-      const quotaControl = authUser?.role === "super_admin"
+      const quotaControl = ["admin", "super_admin"].includes(authUser?.role)
         ? `<input type="number" min="1" max="50" value="${u.cookie_quota ?? 5}" onchange="adminSetCookieQuota(${u.id}, this.value)" style="width:84px"/>`
         : `<span>${u.cookie_quota ?? 5}</span>`;
       return `<tr>
@@ -1047,7 +1075,7 @@ async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, 
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
 async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
 async function adminEditUser(id, username, cookieQuota) {
-  const canEditQuota = authUser?.role === "super_admin";
+  const canEditQuota = ["admin", "super_admin"].includes(authUser?.role);
   const result = await Swal.fire({
     title: "Sửa người dùng",
     html: `

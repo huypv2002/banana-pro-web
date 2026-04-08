@@ -825,7 +825,7 @@ async function loadAdminUsers() {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
       const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
       const planClass = planActive ? "status-ok" : "status-err";
-      const quotaControl = authUser?.role === "super_admin"
+      const quotaControl = ["admin", "super_admin"].includes(authUser?.role)
         ? `<input type="number" min="1" max="50" value="${u.cookie_quota ?? 5}" onchange="adminSetCookieQuota(${u.id}, this.value)" style="width:84px"/>`
         : `<span>${u.cookie_quota ?? 5}</span>`;
       return `<tr>
@@ -920,7 +920,7 @@ async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, 
 async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
 async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
 async function adminEditUser(id, username, cookieQuota) {
-  const canEditQuota = authUser?.role === "super_admin";
+  const canEditQuota = ["admin", "super_admin"].includes(authUser?.role);
   const result = await Swal.fire({
     title: "Sửa người dùng",
     html: `
@@ -1268,15 +1268,31 @@ function updateResultsFromJob(job) {
     }
   });
 
-  // Mark currently running row
+  // Reset untouched rows back to pending before marking running slots
+  for (let idx = 0; idx < total; idx++) {
+    const row = document.getElementById(`resRow${idx}`);
+    if (!row || row.className === "row-done" || row.className === "row-error") continue;
+    row.className = "";
+    row.cells[3].innerHTML = "⏳ Chờ";
+    row.cells[4].innerHTML = "—";
+  }
+
+  // Shared rule with video: 1 output => 3x cookie, 2 outputs => 2x cookie, 3-4 outputs => 1x cookie
   if (job.status === "running" && completed < total) {
-    const runIdx = completed;
-    const row = document.getElementById(`resRow${runIdx}`);
-    if (row && row.className !== "row-done" && row.className !== "row-error") {
+    const cookieCount = Math.max(1, cookies.length || 1);
+    const workersPerCookie = variants <= 1 ? 3 : variants === 2 ? 2 : 1;
+    const runningSlots = Math.min(workersPerCookie * cookieCount, Math.max(0, total - completed));
+    const pendingIndexes = [];
+    for (let idx = 0; idx < total; idx++) {
+      if (!images[idx]) pendingIndexes.push(idx);
+    }
+    pendingIndexes.slice(0, runningSlots).forEach((runIdx, pos) => {
+      const row = document.getElementById(`resRow${runIdx}`);
+      if (!row || row.className === "row-done" || row.className === "row-error") return;
       row.className = "row-running";
       row.cells[3].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang chạy</span>';
-      row.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+      if (pos === 0) row.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 
   // Update per-file status in batch table

@@ -312,7 +312,7 @@ async function adminUpdateUser(request, env, path) {
   if (body.disabled !== undefined) { sets.push("disabled=?"); vals.push(body.disabled ? 1 : 0); }
   if (body.password) { sets.push("password_hash=?"); vals.push(await sha256(body.password)); }
   if (body.cookie_quota !== undefined) {
-    if (getEffectiveRole(actor) !== "super_admin") return err("Chỉ chủ hệ thống mới được đổi giới hạn cookie", 403);
+    if (!["admin", "super_admin"].includes(getEffectiveRole(actor))) return err("Chỉ quản trị viên mới được đổi giới hạn cookie", 403);
     sets.push("cookie_quota=?");
     vals.push(Math.max(1, Math.min(50, parseInt(body.cookie_quota) || 1)));
   }
