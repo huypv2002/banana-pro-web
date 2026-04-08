@@ -116,6 +116,15 @@
     <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo video</button>
     <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
   </div>
+  <div class="card auto-download-card">
+    <label class="toggle-row" for="autoDownloadEachToggle">
+      <div>
+        <div class="toggle-title">Tự tải từng video khi xong</div>
+        <div class="toggle-note">Mỗi video hoàn thành sẽ tự tải ngay về máy nếu trình duyệt đã cho phép tải tự động.</div>
+      </div>
+      <input type="checkbox" id="autoDownloadEachToggle" onchange="toggleAutoDownloadEach(this.checked)"/>
+    </label>
+  </div>
 
   <div class="card" id="progressCard" style="display:none">
     <div class="progress-header">
@@ -170,6 +179,10 @@
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-ghost btn-sm" id="historyBack" onclick="historyGoBack()" style="display:none">Quay lại</button>
         <h2 id="historyTitle">Lịch sử tạo video</h2>
+      </div>
+      <div class="history-tip-banner">
+        <span class="history-tip-date">Lưu trong 24 giờ</span>
+        <span class="history-tip-count">Vào tới đâu lưu tới đó</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-blue" onclick="loadHistory()">Làm mới</button>

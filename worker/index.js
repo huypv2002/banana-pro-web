@@ -541,6 +541,7 @@ async function ensureHistorySchema(env) {
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_user_media_job ON gen_history(user_id, media_type, job_id, id DESC)").run(); } catch (e) {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_user_media_file ON gen_history(user_id, media_type, job_id, file_name, id DESC)").run(); } catch (e) {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_history_cleanup ON gen_history(created_at)").run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_history_unique_media ON gen_history(user_id, job_id, media_type, media_url)").run(); } catch (e) {}
 }
 
 async function getHistoryGroups(request, env, url) {
@@ -630,7 +631,7 @@ async function saveHistory(request, env) {
   const { items } = await request.json();
   if (!items?.length) return err("Không có dữ liệu");
   const stmt = env.DB.prepare(
-    "INSERT INTO gen_history(user_id,job_id,prompt,model,image_url,media_url,media_type,batch_name,file_name) VALUES(?,?,?,?,?,?,?,?,?)"
+    "INSERT OR IGNORE INTO gen_history(user_id,job_id,prompt,model,image_url,media_url,media_type,batch_name,file_name) VALUES(?,?,?,?,?,?,?,?,?)"
   );
   const batch = items.map(i => {
     const mediaType = i.media_type || (i.video_url ? "video" : "image");

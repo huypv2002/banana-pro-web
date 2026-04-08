@@ -35,6 +35,10 @@ let adminSection = "overview";
 let adminHistoryMedia = "";
 let adminHistoryState = { userId: null, username: "", jobId: null, batchName: "", fileName: null };
 let adminCookieUserId = null;
+const savedVideoHistoryUrls = new Set();
+const autoDownloadedVideoUrls = new Set();
+let autoDownloadGuideAcknowledged = localStorage.getItem("bp_video_dl_guide") === "1";
+let autoDownloadEachEnabled = localStorage.getItem("bp_video_auto_each_download") === "1";
 
 const MODE_CONFIG = {
   t2v: {
@@ -136,6 +140,8 @@ function showApp() {
   else if (authUser.plan_active) { const days = Math.ceil((new Date(authUser.plan_expires_at) - new Date()) / 86400000); planEl.textContent = `📦 Còn ${days} ngày`; planEl.className = "plan-badge " + (days <= 3 ? "plan-expiring" : "plan-active"); }
   else { planEl.textContent = "⛔ Hết hạn"; planEl.className = "plan-badge plan-expired"; }
   document.getElementById("navAdmin").style.display = ["admin", "super_admin"].includes(authUser.role) ? "" : "none";
+  const autoToggle = document.getElementById("autoDownloadEachToggle");
+  if (autoToggle) autoToggle.checked = autoDownloadEachEnabled;
   loadCookiesFromDB();
   showTab("generate");
 }
@@ -477,6 +483,8 @@ async function startGeneration() {
   });
 
   try {
+    savedVideoHistoryUrls.clear();
+    autoDownloadedVideoUrls.clear();
     const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap,
                    delay: parseInt(document.getElementById("delayInput").value) || 3 };
     const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
@@ -495,6 +503,7 @@ async function startGeneration() {
 }
 
 function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
   pollFailCount = 0;
   pollInterval = setInterval(async () => {
     if (!currentJobId) return;
@@ -508,13 +517,17 @@ function startPolling() {
         updateProgress(job);
         updateResults(job);
       }
+      persistVideoHistoryIncrementally(job, currentJobId, activeJobMode).catch(() => {});
+      if (autoDownloadEachEnabled) {
+        autoDownloadFinishedVideos(job).catch(() => {});
+      }
       if (job.status === "done" || job.status === "error") {
         clearInterval(pollInterval);
+        pollInterval = null;
         const finishedJobId = currentJobId;
         const finishedMode = activeJobMode;
-        if (job.status === "done" && job.videos?.length) {
-          saveVideoHistory(job, finishedJobId, finishedMode).catch(() => {});
-        }
+        persistVideoHistoryIncrementally(job, finishedJobId, finishedMode).catch(() => {});
+        if (autoDownloadEachEnabled) autoDownloadFinishedVideos(job).catch(() => {});
         currentJobId = null; resetUI();
         if (job.status === "error") sAlert(job.error || "Lỗi", "error");
         else sSuccess(`Hoàn thành ${job.completed} prompt!`);
@@ -572,7 +585,12 @@ async function saveVideoHistory(job, jobId, mode) {
   const batchName = getBatchNameForMode(mode);
   const items = (job.videos || []).flatMap((video, idx) => {
     if (!video?.urls?.length) return [];
-    return video.urls.map(url => ({
+    return video.urls.filter(url => {
+      const key = `${jobId}::${url}`;
+      if (savedVideoHistoryUrls.has(key)) return false;
+      savedVideoHistoryUrls.add(key);
+      return true;
+    }).map(url => ({
       job_id: jobId,
       prompt: video.prompt || "",
       model: video.model || "",
@@ -584,6 +602,102 @@ async function saveVideoHistory(job, jobId, mode) {
   });
   if (items.length) {
     await apiFetch("/user/history", { method: "POST", body: JSON.stringify({ items }) });
+  }
+}
+
+async function persistVideoHistoryIncrementally(job, jobId, mode) {
+  if (!jobId || !mode || !job?.videos?.length) return;
+  await saveVideoHistory(job, jobId, mode);
+}
+
+function buildVideoFilename(url, index) {
+  try {
+    const pathname = new URL(url).pathname || "";
+    const fromPath = pathname.split("/").pop();
+    if (fromPath && fromPath.includes(".")) return fromPath;
+  } catch (_) {}
+  const ext = url.includes(".webm") ? "webm" : url.includes(".mov") ? "mov" : "mp4";
+  return `video_${String(index + 1).padStart(3, "0")}.${ext}`;
+}
+
+async function showVideoAutoDownloadGuide() {
+  let linkClicked = false;
+  await Swal.fire({
+    title: "Tự động tải video",
+    html: `<div style="text-align:left;font-size:0.88rem;line-height:1.65">
+      <p>Bật tính năng này để mỗi video hoàn thành sẽ tự tải ngay về máy.</p>
+      <p style="margin-top:8px"><b>Thiết lập một lần trong Chrome:</b></p>
+      <ol style="padding-left:18px">
+        <li>Bấm vào liên kết <a href="#" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống tự động</a></li>
+        <li>Dán <code>chrome://settings/content/automaticDownloads</code> vào thanh địa chỉ</li>
+        <li>Cho phép trang tải nhiều tệp tự động để hệ thống tự tải không hỏi lại</li>
+      </ol>
+      <p style="margin-top:8px;color:#64748b">Sau khi bấm vào link trên, nút đóng sẽ hiện ra.</p>
+    </div>`,
+    icon: "info",
+    showConfirmButton: true,
+    confirmButtonText: "Đã mở cài đặt",
+    confirmButtonColor: "#16a34a",
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    didOpen: () => {
+      const confirmBtn = Swal.getConfirmButton();
+      if (confirmBtn) confirmBtn.style.display = "none";
+      const link = document.getElementById("videoAutoDlLink");
+      if (link) {
+        link.addEventListener("click", async ev => {
+          ev.preventDefault();
+          try { await navigator.clipboard.writeText("chrome://settings/content/automaticDownloads"); } catch (_) {}
+          link.textContent = "Đã copy link cài đặt";
+          if (!linkClicked && confirmBtn) {
+            linkClicked = true;
+            confirmBtn.style.display = "inline-flex";
+          }
+        });
+      }
+    }
+  });
+  autoDownloadGuideAcknowledged = true;
+  localStorage.setItem("bp_video_dl_guide", "1");
+}
+
+async function toggleAutoDownloadEach(enabled) {
+  if (enabled && !autoDownloadGuideAcknowledged) {
+    await showVideoAutoDownloadGuide();
+  }
+  autoDownloadEachEnabled = !!enabled;
+  localStorage.setItem("bp_video_auto_each_download", autoDownloadEachEnabled ? "1" : "0");
+  const autoToggle = document.getElementById("autoDownloadEachToggle");
+  if (autoToggle) autoToggle.checked = autoDownloadEachEnabled;
+  if (autoDownloadEachEnabled) sSuccess("Đã bật tự tải từng video");
+}
+
+async function autoDownloadFinishedVideos(job) {
+  const videos = job?.videos || [];
+  let idx = 0;
+  for (const video of videos) {
+    const urls = video?.urls || [];
+    for (const url of urls) {
+      const key = `${job.job_id || currentJobId || "job"}::${url}`;
+      if (autoDownloadedVideoUrls.has(key)) continue;
+      autoDownloadedVideoUrls.add(key);
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = buildVideoFilename(url, idx);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+        idx++;
+        await new Promise(resolve => setTimeout(resolve, 180));
+      } catch (_) {
+        autoDownloadedVideoUrls.delete(key);
+      }
+    }
   }
 }
 
@@ -813,13 +927,18 @@ function renderHistoryFolders(items, grid, icon, getName, getMeta, onClick, onDe
     const card = document.createElement("div");
     card.className = "hist-folder";
     const time = item.created_at ? new Date(item.created_at + "Z").toLocaleString("vi-VN") : "";
+    const count = Number(item.count || 0);
     const delId = item.job_id || item.file_name || i;
     const delBtn = onDelete ? `<button class="btn btn-red btn-sm hist-folder-del" onclick="event.stopPropagation();deleteHistoryJob('${esc(delId)}')" title="Xóa">🗑</button>` : "";
     card.innerHTML = `
       <div class="hist-folder-icon">${icon}</div>
       <div class="hist-folder-info">
         <div class="hist-folder-name">${esc(getName(item))}</div>
-        <div class="hist-folder-meta">${esc(getMeta(item))} · ${time}</div>
+        <div class="hist-folder-meta">${esc(getMeta(item))}</div>
+        <div class="hist-folder-badges">
+          <span class="hist-badge hist-badge-blue">Ngày tạo: ${esc(time || "Chưa rõ")}</span>
+          <span class="hist-badge ${count > 0 ? "hist-badge-green" : "hist-badge-red"}">${count} video đã lưu</span>
+        </div>
       </div>${delBtn}`;
     card.onclick = () => onClick(item);
     grid.appendChild(card);
