@@ -1,6 +1,8 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
-const STORAGE_TOKEN_KEY = "bp_image_token";
-const STORAGE_USER_KEY = "bp_image_user";
+const STORAGE_TOKEN_KEY = "bp_token";
+const STORAGE_USER_KEY = "bp_user";
+const LEGACY_TOKEN_KEYS = ["bp_token", "bp_image_token", "bp_video_token"];
+const LEGACY_USER_KEYS = ["bp_user", "bp_image_user", "bp_video_user"];
 
 // ── SweetAlert2 helpers ───────────────────────────────────────────────────────
 const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500, timerProgressBar: true });
@@ -11,8 +13,15 @@ async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
 
 // ── Auth State ────────────────────────────────────────────────────────────────
-let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || "";
-let authUser = JSON.parse(localStorage.getItem(STORAGE_USER_KEY) || "null");
+let authToken = LEGACY_TOKEN_KEYS.map(k => localStorage.getItem(k)).find(Boolean) || "";
+let authUser = null;
+for (const key of LEGACY_USER_KEYS) {
+  const raw = localStorage.getItem(key);
+  if (!raw) continue;
+  try { authUser = JSON.parse(raw); break; } catch (_) {}
+}
+if (authToken) localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+if (authUser) localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
 let authTab = "login";
 
 // ── App State ─────────────────────────────────────────────────────────────────
@@ -125,14 +134,12 @@ async function handleLogout() {
 function clearAuth() {
   authToken = "";
   authUser = null;
-  localStorage.removeItem(STORAGE_TOKEN_KEY);
-  localStorage.removeItem(STORAGE_USER_KEY);
+  LEGACY_TOKEN_KEYS.forEach(k => localStorage.removeItem(k));
+  LEGACY_USER_KEYS.forEach(k => localStorage.removeItem(k));
 }
 
 function switchApp(url) {
-  const target = new URL(url);
-  target.searchParams.set("_sw", String(Date.now()));
-  window.location.assign(target.toString());
+  window.location.assign(url);
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
