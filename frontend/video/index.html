@@ -112,6 +112,15 @@
     </table>
   </div>
 
+  <div class="card" id="progressCard" style="display:none">
+    <div class="progress-header">
+      <span id="progressLabel">Đang tạo...</span>
+      <span id="progressBadge" class="badge badge-running">Đang tạo</span>
+    </div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">0 / 0 video (0%)</div>
+  </div>
+
   <div class="action-buttons" style="grid-template-columns:1fr 1fr">
     <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo video</button>
     <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
@@ -138,15 +147,6 @@
       </div>
       <input type="checkbox" id="autoDownloadEachToggle" onchange="toggleAutoDownloadEach(this.checked)"/>
     </label>
-  </div>
-
-  <div class="card" id="progressCard" style="display:none">
-    <div class="progress-header">
-      <span id="progressLabel">Đang tạo...</span>
-      <span id="progressBadge" class="badge badge-running">Đang tạo</span>
-    </div>
-    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
-    <div class="progress-text" id="progressText">0 / 0 video (0%)</div>
   </div>
 </div>
 

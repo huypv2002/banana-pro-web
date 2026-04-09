@@ -122,6 +122,15 @@
 
     <!-- Ref image UI moved to results table toolbar -->
 
+    <div class="card" id="progressCard" style="display:none">
+      <div class="progress-header">
+        <span id="progressLabel">Đang chạy...</span>
+        <span id="progressBadge" class="badge badge-running">Đang chạy</span>
+      </div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">0 / 0 ảnh (0%)</div>
+    </div>
+
     <div class="action-buttons">
       <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo ảnh</button>
       <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>Tạm dừng</button>
@@ -140,14 +149,6 @@
       </label>
     </div>
 
-    <div class="card" id="progressCard" style="display:none">
-      <div class="progress-header">
-        <span id="progressLabel">Đang chạy...</span>
-        <span id="progressBadge" class="badge badge-running">Đang chạy</span>
-      </div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
-      <div class="progress-text" id="progressText">0 / 0 ảnh (0%)</div>
-    </div>
     <div id="errorMsg" class="error-msg" style="display:none"></div>
   </div>
 
