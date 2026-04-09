@@ -459,13 +459,35 @@ class ChromeCDPSession:
 
         if self.process:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=5)
-            except Exception:
+                # Ưu tiên đóng Chrome êm qua CDP để cookies/session được flush vào profile thật.
                 try:
-                    self.process.kill()
+                    resp = requests.get(
+                        f"http://127.0.0.1:{self.port}/json/version",
+                        timeout=2,
+                    )
+                    if resp.status_code == 200:
+                        info = resp.json()
+                        browser_ws = info.get("webSocketDebuggerUrl")
+                        if browser_ws:
+                            browser_conn = _get_ws_module().create_connection(browser_ws, timeout=5)
+                            browser_conn.send(json.dumps({"id": 1, "method": "Browser.close"}))
+                            try:
+                                browser_conn.close()
+                            except Exception:
+                                pass
                 except Exception:
                     pass
+
+                self.process.wait(timeout=8)
+            except Exception:
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=5)
+                except Exception:
+                    try:
+                        self.process.kill()
+                    except Exception:
+                        pass
             self.process = None
 
     # ─── CDP WebSocket Communication ─────────────────────────
@@ -965,6 +987,8 @@ class ChromeCDPSession:
             if has_session:
                 cookie_names = [c["name"] for c in labs_cookies]
                 self.log_fn(f"   ✅ Lấy được {len(labs_cookies)} cookies: {', '.join(cookie_names)}")
+                self.log_fn(f"   💾 Đợi Chrome ghi cookies/session vào profile thật...")
+                time.sleep(3)
             else:
                 self.log_fn(f"   ❌ Thiếu session-token trong cookies!")
                 labs_cookies = []
