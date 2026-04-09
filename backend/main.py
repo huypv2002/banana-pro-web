@@ -194,33 +194,15 @@ def get_client_with_fallback(cookies_dict: dict, proxy_config=None):
     raise ValueError(f"Tất cả profiles đều thất bại. Lỗi cuối: {last_err}")
 
 class RecaptchaWorker:
-    def __init__(self, profile_path):
-        import tempfile, shutil, subprocess
+    def __init__(self):
+        import tempfile, subprocess
         from chrome_cdp_cookie import ChromeCDPSession
-        self.profile_path = profile_path
         self.temp_dir = tempfile.mkdtemp(prefix="recaptcha_pool_")
-        
-        # Copy profile safely
-        try:
-            subprocess.run(
-                ["robocopy", profile_path, self.temp_dir, "/E", "/B", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS"],
-                capture_output=True, timeout=30
-            )
-        except Exception:
-            try:
-                shutil.copytree(profile_path, self.temp_dir, dirs_exist_ok=True, ignore_dangling_symlinks=True)
-            except Exception:
-                pass
-                
-        # Remove lock files
-        for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
-            for d in [self.temp_dir, os.path.join(self.temp_dir, "Default")]:
-                lp = os.path.join(d, lock_file)
-                if os.path.exists(lp):
-                    try: os.remove(lp)
-                    except: pass
+        self.profile_path = "CLEAN_PROFILE"
                     
-        self.session = ChromeCDPSession(self.temp_dir, headless=False, window_pos=(-3000, -3000))
+        # Dùng headless=True (headless=new ngầm trong ChromeCDPSession)
+        # để không bung GUI trên VPS Linux RAM yếu
+        self.session = ChromeCDPSession(self.temp_dir, headless=True, window_pos=(-3000, -3000))
         self.session.launch()
         
         # Connect to a target and navigate
@@ -264,11 +246,11 @@ class RecaptchaWorker:
             
             val = result.get("result", {}).get("result", {}).get("value")
             if isinstance(val, str) and not val.startswith("ERROR:") and len(val) > 20:
-                logger.info(f"Pool lấy thành công token độ dài {len(val)} bằng profile {os.path.basename(self.profile_path)}")
+                logger.info(f"Pool lấy thành công token độ dài {len(val)}")
                 return val
                 
             # If not working, navigate to refresh the page
-            logger.warning(f"Không lấy được token, load lại labs.google cho profile {os.path.basename(self.profile_path)}")
+            logger.warning(f"Không lấy được token, load lại labs.google")
             self.session.navigate("https://labs.google/fx/tools/flow", wait_seconds=5)
             self.session._dismiss_popups()
         except Exception as e:
@@ -284,21 +266,20 @@ pool_idx = 0
 pool_lock = threading.Lock()
 
 def init_recaptcha_pool():
-    profiles = get_all_profiles()
-    if not profiles:
-        logger.info("Chrome CDP startup: chưa có profile nào sẵn sàng.")
+    if os.environ.get("AUTO_RECAPTCHA") != "1":
         return
         
-    logger.info(f"Chrome CDP startup: phát hiện {len(profiles)} profile(s), bắt đầu spawn tối đa 5 profiles cho reCAPTCHA pool...")
-    for profile in profiles[:5]: # Chỉ spawn 5 profile
+    logger.info("Chrome CDP startup: Bắt đầu spawn 5 clean profiles (Tiết kiệm RAM) cho reCAPTCHA pool...")
+    for i in range(5):
         try:
-            logger.info(f"Đang spawn profile {os.path.basename(profile)}...")
-            worker = RecaptchaWorker(profile)
+            logger.info(f"Đang spawn instance {i+1}...")
+            worker = RecaptchaWorker()
             with pool_lock:
                 pool_workers.append(worker)
-            logger.info(f"Spawn thành công profile {os.path.basename(profile)}.")
+            logger.info(f"Spawn thành công instance {i+1}.")
+            time.sleep(1.5) # Sleep between spawns to avoid CPU/IO spike on 8GB VPS
         except Exception as e:
-            logger.error(f"Lỗi khởi tạo profile {profile}: {e}")
+            logger.error(f"Lỗi khởi tạo worker {i+1}: {e}")
 
 @app.on_event("startup")
 def startup_event():
