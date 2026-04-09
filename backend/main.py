@@ -2,10 +2,10 @@
 FastAPI backend for Banana Pro (Flow) image generation.
 Runs on VPS Windows.
 """
-import os, sys, uuid, time, asyncio, logging, json as _json
+import os, sys, uuid, time, logging, json as _json
 from pathlib import Path
 from typing import Optional, List
-from concurrent.futures import ThreadPoolExecutor
+import threading
 
 # ✅ Set env TRƯỚC khi import complete_flow (LabsFlowClient đọc env lúc __init__)
 os.environ["AUTO_RECAPTCHA"] = "1"
@@ -27,9 +27,15 @@ ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
-executor = ThreadPoolExecutor(max_workers=2)
 jobs: dict = {}
 upscaled_store: dict = {}  # {key: (base64_string, timestamp)}
+
+
+def _start_background_job(fn, *args):
+    """Chạy mỗi job trong thread riêng để không bị nghẽn bởi executor nhỏ toàn cục."""
+    t = threading.Thread(target=fn, args=args, daemon=True)
+    t.start()
+    return t
 
 def _cleanup_upscaled():
     """Remove entries older than 10 minutes."""
@@ -459,10 +465,11 @@ async def generate(req: GenerateRequest):
     jobs[job_id] = {"status": "pending", "total": len(req.prompts) * req.variants,
                     "completed": 0, "images": [], "error": None, "cancelled": False}
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, _run_generation,
-                         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
-                         req.resolution, req.reference_images or [], req.folder_images or {}, req.cookie_pool or [])
+    _start_background_job(
+        _run_generation,
+        job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
+        req.resolution, req.reference_images or [], req.folder_images or {}, req.cookie_pool or []
+    )
 
     return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 
@@ -565,11 +572,12 @@ async def generate_video(req: VideoGenerateRequest):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts),
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, _run_video_generation,
-                         job_id, req.cookie, req.prompts, req.mode, req.model,
-                         req.num_videos, req.ref_images or {}, req.end_images or {},
-                         req.delay, req.workers, req.cookie_pool or [])
+    _start_background_job(
+        _run_video_generation,
+        job_id, req.cookie, req.prompts, req.mode, req.model,
+        req.num_videos, req.ref_images or {}, req.end_images or {},
+        req.delay, req.workers, req.cookie_pool or []
+    )
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 
@@ -583,9 +591,10 @@ async def generate_video_from_image(req: VideoFromImageRequest):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts),
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, _run_video_from_image,
-                         job_id, req.cookie, req.prompts, req.image, req.model, req.num_videos)
+    _start_background_job(
+        _run_video_from_image,
+        job_id, req.cookie, req.prompts, req.image, req.model, req.num_videos
+    )
     return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
 
 @app.get("/video-jobs/{job_id}")

@@ -518,7 +518,7 @@ class LabsFlowClient:
     def set_headless_mode(cls, headless: bool):
         """Đặt chế độ headless cho reCAPTCHA browser."""
         cls._global_headless_mode = headless
-        mode_str = "HEADLESS" if headless else "VISIBLE"
+        mode_str = "HEADLESS" if headless else "OFF-SCREEN"
         print(f"  ✅ reCAPTCHA mode: LOCAL BROWSER ({mode_str})")
 
     @classmethod
@@ -3433,9 +3433,9 @@ class LabsFlowClient:
                 "--disable-popup-blocking",
                 "--metrics-recording-only",
                 "--no-service-autorun",
-                # Hiện cửa sổ thật để tiện theo dõi captcha và token
-                "--window-position=80,80",
-                "--window-size=1280,900",
+                # Off-screen nhưng vẫn là Chrome thật, không headless
+                "--window-position=-3000,-3000",
+                "--window-size=400,300",
             ]
             
             try:
@@ -4165,7 +4165,7 @@ class LabsFlowClient:
         
         # ✅ SOURCE 1: Chrome CDP (ưu tiên - Chrome thật, trust score cao)
         if self._should_use_zendriver():
-            print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, có cửa sổ)...")
+            print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, off-screen)...")
             try:
                 token = self._get_recaptcha_token_zendriver(
                     timeout_s=60,
