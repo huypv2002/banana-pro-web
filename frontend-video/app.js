@@ -162,6 +162,9 @@ function logout() { clearAuth(); showLogin(); }
 function switchApp(url) {
   window.location.assign(url);
 }
+function openExternalTool(url) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 let authTab = "login";
 function switchAuthTab(tab) {
   authTab = tab;
@@ -785,43 +788,136 @@ function buildVideoFilename(url, index) {
 }
 
 async function showVideoAutoDownloadGuide() {
-  let linkClicked = false;
-  await Swal.fire({
-    title: "Tự động tải video",
-    html: `<div style="text-align:left;font-size:0.88rem;line-height:1.65">
-      <p>Bật tính năng này để mỗi video hoàn thành sẽ tự tải ngay về máy.</p>
-      <p style="margin-top:8px"><b>Thiết lập một lần trong Chrome:</b></p>
-      <ol style="padding-left:18px">
-        <li>Bấm vào liên kết <a href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống</a></li>
-        <li>Nếu Chrome chặn không cho website mở trang này, dán <code>chrome://settings/downloads</code> vào thanh địa chỉ</li>
-        <li>Cho phép trang tải nhiều tệp tự động để hệ thống tự tải không hỏi lại</li>
+  await openDetailedGuide("downloads");
+  autoDownloadGuideAcknowledged = true;
+  localStorage.setItem("bp_video_dl_guide", "1");
+}
+
+function buildGuideTabButton(id, label, activeId) {
+  return `<button type="button" class="guide-tab-btn${id === activeId ? " active" : ""}" data-guide-tab="${id}">${label}</button>`;
+}
+
+function buildGuidePanel(id, title, body, activeId) {
+  return `<section class="guide-panel${id === activeId ? " active" : ""}" data-guide-panel="${id}">
+    <h3>${title}</h3>
+    ${body}
+  </section>`;
+}
+
+async function openDetailedGuide(initialTab = "overview") {
+  const tabs = [
+    { id: "overview", label: "Dùng app" },
+    { id: "downloads", label: "Tải xuống" },
+    { id: "multi", label: "Nhiều tệp" },
+    { id: "cookie", label: "Cookie" },
+    { id: "tips", label: "Mẹo nhanh" },
+  ];
+  const panels = {
+    overview: `
+      <p>Banana Pro Video hỗ trợ 4 mode chính: <b>T2V</b>, <b>I2V</b>, <b>FL</b> và <b>R2V</b>. Bạn chỉ cần chọn mode, nạp file <code>.txt</code> hoặc cả thư mục <code>.txt</code>, rồi bấm <b>Tạo video</b>.</p>
+      <ol>
+        <li>Đăng nhập và kiểm tra gói đang hoạt động ở góc phải trên cùng.</li>
+        <li>Chọn mode tạo video phù hợp với nhu cầu.</li>
+        <li>Nạp một file <code>.txt</code> hoặc cả thư mục chứa nhiều file <code>.txt</code>.</li>
+        <li>Nếu mode cần ảnh đầu vào hoặc ảnh kết thúc, thêm ảnh ngay trong bảng kết quả bên phải.</li>
+        <li>Bấm <b>Tạo video</b>, theo dõi tiến trình, rồi dùng khu vực <b>Chạy lại thông minh</b> nếu có dòng lỗi hoặc video chưa ưng ý.</li>
       </ol>
-      <p style="margin-top:8px;color:#64748b">Chrome có thể chặn website mở trực tiếp trang <code>chrome://</code>. Nếu vậy, hệ thống sẽ tự copy sẵn đường dẫn để anh/chị dán nhanh.</p>
-    </div>`,
-    icon: "info",
+      <div class="guide-note-box">Mẹo: nếu bạn đang làm nhiều bộ prompt, nên chia theo từng file <code>.txt</code> nhỏ để tiện chạy lại file lỗi hoặc file chưa đẹp sau này.</div>
+    `,
+    downloads: `
+      <p>Phần tải xuống cần cài một lần trên Chrome. Sau khi bật đúng, app có thể tự tải file về mà không hỏi lại liên tục.</p>
+      <ol>
+        <li>Mở cài đặt tải xuống của Chrome.</li>
+        <li>Chọn thư mục tải về mặc định mà bạn muốn lưu tất cả video.</li>
+        <li>Tắt lựa chọn hỏi vị trí lưu trước khi tải nếu bạn muốn tải thẳng về một thư mục cố định.</li>
+        <li>Quay lại app và bật công tắc <b>Tự tải từng video khi xong</b>.</li>
+      </ol>
+      <div class="guide-code">chrome://settings/downloads</div>
+      <div class="guide-actions">
+        <a class="guide-link-btn" href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="guideDownloadsLink">Mở cài đặt tải xuống</a>
+        <button type="button" class="btn btn-outline" id="copyDownloadsPathBtn">Copy đường dẫn cài đặt</button>
+      </div>
+      <div class="guide-note-box">Nếu Chrome không cho web mở trực tiếp trang <code>chrome://</code>, chỉ cần copy dòng trên rồi dán vào thanh địa chỉ Chrome là được.</div>
+    `,
+    multi: `
+      <p>Để tải nhiều tệp liên tiếp mà không bị hỏi từng lần, bạn cần cho phép website tải nhiều tệp tự động.</p>
+      <ol>
+        <li>Khi Chrome hiện popup hỏi cho phép tải nhiều file, chọn <b>Cho phép</b>.</li>
+        <li>Nếu trước đó lỡ bấm chặn, mở biểu tượng ổ khóa ở thanh địa chỉ rồi cho phép <b>Automatic downloads</b>.</li>
+        <li>Giữ công tắc <b>Tự tải từng video khi xong</b> ở trạng thái bật.</li>
+        <li>Không nên bật chế độ hỏi vị trí lưu từng file nếu muốn chạy batch lớn.</li>
+      </ol>
+      <p>Với batch nhiều prompt, app sẽ tự tải từng video khi hoàn tất. Nếu trình duyệt vẫn hỏi, đó là do quyền tải tự động của site chưa được bật đủ.</p>
+      <div class="guide-note-box">Khuyến nghị: dùng một thư mục riêng cho Banana Pro Video, ví dụ <code>D:\\BananaPro\\downloads</code> hoặc <code>Downloads/BananaProVideo</code>, để dễ quản lý batch.</div>
+    `,
+    cookie: `
+      <p>Để app lấy token hoạt động ổn định, bạn cần nhập cookie phiên Google Labs còn sống. Cách nhanh nhất là lấy cookie sau khi đăng nhập sẵn vào <b>labs.google</b>.</p>
+      <ol>
+        <li>Đăng nhập tài khoản Google dùng cho Labs trong Chrome thật.</li>
+        <li>Mở trang <code>https://labs.google/fx/tools/flow</code>.</li>
+        <li>Dùng extension xuất cookie hoặc mở DevTools để lấy cookie của domain liên quan.</li>
+        <li>Quay lại app, vào <b>Kho cookie</b>, thêm cookie đúng tài khoản tương ứng.</li>
+        <li>Kiểm tra lại trạng thái cookie trong kho trước khi chạy batch lớn.</li>
+      </ol>
+      <div class="guide-note-box">Cookie tốt là cookie còn phiên đăng nhập, mở được Labs, và không bị Google đánh dấu hoạt động bất thường. Nếu 403 nhiều, nên đổi profile hoặc cookie khác sạch hơn.</div>
+    `,
+    tips: `
+      <p>Một vài mẹo để dùng app mượt hơn khi chạy nhiều batch:</p>
+      <ul>
+        <li>Dùng thư mục <code>.txt</code> để chạy nhiều file một lần, thay vì nhét mọi prompt vào một file khổng lồ.</li>
+        <li>Dùng <b>Chạy lại file lỗi</b> khi có prompt fail; dùng <b>Chạy lại file chưa đẹp</b> sau khi đánh dấu các video chưa ưng.</li>
+        <li>Nếu tải không tự động, kiểm tra lại quyền <b>Automatic downloads</b> và cài đặt thư mục tải về.</li>
+        <li>Nếu cookie đang chạy ổn, hạn chế đăng nhập ra vào liên tục trên cùng profile.</li>
+        <li>Nút <b>ElevenLabs</b> trên đầu trang sẽ mở sang công cụ voice ở tab mới, không làm mất tiến trình hiện tại.</li>
+      </ul>
+      <div class="guide-note-box">Khi hỗ trợ người dùng mới, cứ bảo họ mở <b>Hướng dẫn chi tiết</b> trước. Popup này gom đủ các bước cài tải về, cookie và cách dùng app nên đỡ phải giải thích lại nhiều lần.</div>
+    `,
+  };
+
+  await Swal.fire({
+    title: "Hướng dẫn chi tiết",
+    width: "min(1080px, 96vw)",
     showConfirmButton: true,
-    confirmButtonText: "Đã mở cài đặt",
+    confirmButtonText: "Đã hiểu",
     confirmButtonColor: "#16a34a",
-    allowOutsideClick: false,
-    allowEscapeKey: false,
+    customClass: { popup: "guide-popup" },
+    html: `<div class="guide-shell">
+      <div class="guide-tabs">
+        ${tabs.map(tab => buildGuideTabButton(tab.id, tab.label, initialTab)).join("")}
+      </div>
+      <div class="guide-panel-wrap">
+        ${tabs.map(tab => buildGuidePanel(tab.id, tab.label, panels[tab.id], initialTab)).join("")}
+      </div>
+    </div>`,
     didOpen: () => {
-      const confirmBtn = Swal.getConfirmButton();
-      if (confirmBtn) confirmBtn.style.display = "none";
-      const link = document.getElementById("videoAutoDlLink");
-      if (link) {
-        link.addEventListener("click", async ev => {
-          try { await navigator.clipboard.writeText("chrome://settings/downloads"); } catch (_) {}
-          link.textContent = "Đã thử mở và copy sẵn đường dẫn";
-          if (!linkClicked && confirmBtn) {
-            linkClicked = true;
-            confirmBtn.style.display = "inline-flex";
+      const activateTab = (tabId) => {
+        document.querySelectorAll("[data-guide-tab]").forEach(btn => btn.classList.toggle("active", btn.getAttribute("data-guide-tab") === tabId));
+        document.querySelectorAll("[data-guide-panel]").forEach(panel => panel.classList.toggle("active", panel.getAttribute("data-guide-panel") === tabId));
+      };
+      document.querySelectorAll("[data-guide-tab]").forEach(btn => {
+        btn.addEventListener("click", () => activateTab(btn.getAttribute("data-guide-tab")));
+      });
+      const copyBtn = document.getElementById("copyDownloadsPathBtn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText("chrome://settings/downloads");
+            copyBtn.textContent = "Đã copy";
+          } catch (_) {
+            copyBtn.textContent = "Copy thủ công";
           }
         });
       }
-    }
+      const downloadsLink = document.getElementById("guideDownloadsLink");
+      if (downloadsLink) {
+        downloadsLink.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText("chrome://settings/downloads");
+          } catch (_) {}
+        });
+      }
+    },
   });
-  autoDownloadGuideAcknowledged = true;
-  localStorage.setItem("bp_video_dl_guide", "1");
 }
 
 async function toggleAutoDownloadEach(enabled) {

@@ -42,9 +42,11 @@
     <div class="app-switcher">
       <button type="button" class="app-switch-link" onclick="switchApp('/')">Ảnh</button>
       <button type="button" class="app-switch-link active" onclick="switchApp('/video/')">Video</button>
+      <button type="button" class="app-switch-link" onclick="openExternalTool('https://livevoice.pro/')">ElevenLabs</button>
     </div>
     <span id="userInfo" class="user-info"></span>
     <span id="planInfo" class="plan-badge"></span>
+    <button class="btn btn-outline" onclick="openDetailedGuide()">Hướng dẫn chi tiết</button>
     <button class="btn btn-outline" onclick="openCookieModal()">Kho cookie</button>
     <button class="btn btn-outline" onclick="logout()">Đăng xuất</button>
   </div>
