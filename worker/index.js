@@ -36,6 +36,7 @@ export default {
     // ── Admin routes ──
     if (path === "/admin/users" && request.method === "GET") return adminListUsers(request, env);
     if (path === "/admin/users" && request.method === "POST") return adminCreateUser(request, env);
+    if (path === "/admin/users/activity-summary" && request.method === "GET") return adminUserActivitySummary(request, env);
     if (path === "/admin/users/bulk-demo" && request.method === "POST") return adminCreateBulkDemoUsers(request, env);
     if (path.startsWith("/admin/users/") && request.method === "PUT") return adminUpdateUser(request, env, path);
     if (path.startsWith("/admin/users/") && request.method === "DELETE") return adminDeleteUser(request, env, path);
@@ -378,6 +379,37 @@ async function adminCreateBulkDemoUsers(request, env) {
     defaults: { cookie_quota: cookieQuota, plan_days: planDays, role: "user" },
     users: created,
   });
+}
+
+async function adminUserActivitySummary(request, env) {
+  const [, e] = await requireAdmin(request, env);
+  if (e) return e;
+  await ensureUserSchema(env);
+  await ensureHistorySchema(env);
+  const { results } = await env.DB.prepare(`
+    SELECT
+      u.id,
+      u.username,
+      u.role,
+      u.disabled,
+      u.created_at,
+      u.plan_expires_at,
+      u.cookie_quota,
+      u.plan_scope,
+      COUNT(DISTINCT c.id) as cookie_count,
+      COALESCE(SUM(CASE WHEN COALESCE(h.media_type,'image')='image' AND COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!='' THEN 1 ELSE 0 END), 0) as image_count,
+      COALESCE(SUM(CASE WHEN COALESCE(h.media_type,'image')='video' AND COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!='' THEN 1 ELSE 0 END), 0) as video_count,
+      MAX(h.created_at) as last_activity_at
+    FROM users u
+    LEFT JOIN user_cookies c ON c.user_id = u.id
+    LEFT JOIN gen_history h ON h.user_id = u.id
+    GROUP BY u.id, u.username, u.role, u.disabled, u.created_at, u.plan_expires_at, u.cookie_quota, u.plan_scope
+    ORDER BY
+      CASE WHEN MAX(h.created_at) IS NULL THEN 1 ELSE 0 END,
+      MAX(h.created_at) DESC,
+      u.id ASC
+  `).all();
+  return json(results.map(item => ({ ...item, role: getEffectiveRole(item) })));
 }
 
 async function adminUpdateUser(request, env, path) {

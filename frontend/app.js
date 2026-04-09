@@ -1003,6 +1003,7 @@ async function loadAdminUsers() {
     const users = await res.json();
     const now = new Date().toISOString();
     updateAdminDashboard(users);
+    loadAdminTracking(users);
     const tbody = document.getElementById("adminUserBody");
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
@@ -1068,6 +1069,49 @@ async function loadAdminUsers() {
       }).join("");
     }
   } catch (e) {}
+}
+
+async function loadAdminTracking(fallbackUsers = []) {
+  const body = document.getElementById("adminTrackingBody");
+  if (!body) return;
+  try {
+    const res = await apiFetch("/admin/users/activity-summary");
+    if (!res.ok) throw new Error("activity-summary failed");
+    const rows = await res.json();
+    const now = new Date().toISOString();
+    body.innerHTML = rows.map(row => {
+      const role = roleLabel(row.role);
+      const planActive = ["admin", "super_admin"].includes(row.role) || (row.plan_expires_at && row.plan_expires_at > now);
+      const planText = ["admin", "super_admin"].includes(row.role)
+        ? "Không giới hạn"
+        : row.plan_expires_at
+          ? new Date(row.plan_expires_at).toLocaleDateString("vi-VN")
+          : "Chưa có";
+      const createdAt = row.created_at ? new Date(row.created_at + "Z").toLocaleDateString("vi-VN") : "—";
+      const lastActivity = row.last_activity_at ? new Date(row.last_activity_at + "Z").toLocaleString("vi-VN") : "Chưa phát sinh";
+      return `<tr>
+        <td><strong>${esc(row.username)}</strong></td>
+        <td>${role}</td>
+        <td>${row.image_count || 0}</td>
+        <td>${row.video_count || 0}</td>
+        <td>${row.cookie_count || 0} / ${row.cookie_quota ?? 0}</td>
+        <td><span class="${planActive ? "status-ok" : "status-err"}">${planText}</span></td>
+        <td>${createdAt}</td>
+        <td>${lastActivity}</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="8" style="text-align:center;padding:16px">Chưa có dữ liệu</td></tr>';
+  } catch (_) {
+    body.innerHTML = (fallbackUsers || []).map(row => `<tr>
+      <td><strong>${esc(row.username)}</strong></td>
+      <td>${roleLabel(row.role)}</td>
+      <td>0</td>
+      <td>0</td>
+      <td>0 / ${row.cookie_quota ?? 0}</td>
+      <td>${row.plan_expires_at ? new Date(row.plan_expires_at).toLocaleDateString("vi-VN") : (["admin", "super_admin"].includes(row.role) ? "Không giới hạn" : "Chưa có")}</td>
+      <td>${row.created_at ? new Date(row.created_at).toLocaleDateString("vi-VN") : "—"}</td>
+      <td>Chưa phát sinh</td>
+    </tr>`).join("") || '<tr><td colspan="8" style="text-align:center;padding:16px">Không tải được dữ liệu tracking</td></tr>';
+  }
 }
 
 function updateAdminDashboard(users) {
