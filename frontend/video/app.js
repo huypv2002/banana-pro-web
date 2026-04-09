@@ -617,7 +617,7 @@ async function startGeneration() {
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
 
   const model = document.getElementById("modelSelect").value;
-  const num_videos = parseInt(document.getElementById("numVideosInput").value) || 1;
+  const num_videos = 1;
 
   // Validate ảnh theo mode
   if (currentMode === "i2v" || currentMode === "r2v") {
@@ -1031,7 +1031,7 @@ function populateResultsTable() {
 
 function getActiveVideoSlots() {
   const cookieCount = Math.max(1, cookies.length || 1);
-  const numVideos = parseInt(document.getElementById("numVideosInput")?.value || "1") || 1;
+  const numVideos = 1;
   let workersPerCookie = 1;
   if (currentMode === "t2v") {
     if (numVideos <= 1) workersPerCookie = 3;
