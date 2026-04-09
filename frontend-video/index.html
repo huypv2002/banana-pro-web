@@ -355,6 +355,17 @@
                   <input type="number" id="adminNewCookieQuota" min="1" max="50" value="5" placeholder="Giới hạn cookie"/>
                   <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
                 </div>
+                <div class="admin-bulk-demo" id="adminBulkDemoBox" style="display:none">
+                  <div class="admin-bulk-demo-head">
+                    <h4>Tạo tài khoản demo hàng loạt</h4>
+                    <p>Mặc định mỗi tài khoản mới sẽ có 1 cookie và 7 ngày sử dụng.</p>
+                  </div>
+                  <div class="admin-form">
+                    <input type="number" id="adminDemoCount" min="1" max="200" value="20" placeholder="Số lượng"/>
+                    <input type="text" id="adminDemoPrefix" value="demo" placeholder="Tiền tố username"/>
+                    <button class="btn btn-blue admin-submit-btn" onclick="adminBulkCreateDemoUsers()">Tạo account demo</button>
+                  </div>
+                </div>
               </div>
             </aside>
           </section>

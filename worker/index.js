@@ -36,6 +36,7 @@ export default {
     // ── Admin routes ──
     if (path === "/admin/users" && request.method === "GET") return adminListUsers(request, env);
     if (path === "/admin/users" && request.method === "POST") return adminCreateUser(request, env);
+    if (path === "/admin/users/bulk-demo" && request.method === "POST") return adminCreateBulkDemoUsers(request, env);
     if (path.startsWith("/admin/users/") && request.method === "PUT") return adminUpdateUser(request, env, path);
     if (path.startsWith("/admin/users/") && request.method === "DELETE") return adminDeleteUser(request, env, path);
     if (path === "/admin/history/users" && request.method === "GET") return adminGetHistoryUsers(request, env, url);
@@ -310,6 +311,73 @@ async function adminCreateUser(request, env) {
     if (e.message?.includes("UNIQUE")) return err("Username đã tồn tại");
     return err(e.message, 500);
   }
+}
+
+function makeDemoPassword(length = 10) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+function makeDemoUsername(prefix, stamp, index) {
+  return `${prefix}${stamp}${String(index).padStart(3, "0")}`;
+}
+
+async function adminCreateBulkDemoUsers(request, env) {
+  const [actor, e] = await requireAdmin(request, env);
+  if (e) return e;
+  if (getEffectiveRole(actor) !== "super_admin") return err("Chỉ super admin mới được tạo demo hàng loạt", 403);
+  await ensureUserSchema(env);
+
+  const body = await request.json().catch(() => ({}));
+  const count = Math.max(1, Math.min(200, parseInt(body.count ?? 10) || 10));
+  const rawPrefix = String(body.prefix || "demo").trim().toLowerCase();
+  const prefix = rawPrefix.replace(/[^a-z0-9_]/g, "") || "demo";
+  const planDays = 7;
+  const cookieQuota = 1;
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(2, 12);
+  const created = [];
+
+  for (let idx = 1; idx <= count; idx++) {
+    let attempts = 0;
+    let username = "";
+    let inserted = false;
+    while (!inserted && attempts < 20) {
+      attempts += 1;
+      username = makeDemoUsername(prefix, stamp, attempts === 1 ? idx : `${idx}${attempts}`);
+      const password = makeDemoPassword();
+      const hash = await sha256(password);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + planDays);
+      try {
+        await env.DB.prepare(
+          "INSERT INTO users(username,password_hash,role,cookie_quota,plan_scope,plan_expires_at) VALUES(?,?,?,?,?,?)"
+        ).bind(username, hash, "user", cookieQuota, "both", expiresAt.toISOString()).run();
+        created.push({
+          username,
+          password,
+          role: "user",
+          cookie_quota: cookieQuota,
+          plan_days: planDays,
+          plan_expires_at: expiresAt.toISOString(),
+        });
+        inserted = true;
+      } catch (insertErr) {
+        if (!insertErr.message?.includes("UNIQUE")) return err(insertErr.message || "Không thể tạo tài khoản demo", 500);
+      }
+    }
+    if (!inserted) return err(`Không thể tạo tài khoản demo số ${idx}`, 500);
+  }
+
+  return json({
+    ok: true,
+    count: created.length,
+    defaults: { cookie_quota: cookieQuota, plan_days: planDays, role: "user" },
+    users: created,
+  });
 }
 
 async function adminUpdateUser(request, env, path) {

@@ -261,6 +261,9 @@ textarea { resize: vertical; }
 .admin-user-table select { min-width:132px; border-radius:12px; background:#fff; border:1px solid #dbe2ea; padding:8px 10px; font-size:.8rem; }
 .admin-form { display:grid; gap:10px; }
 .admin-submit-btn { width:100%; justify-content:center; }
+.admin-bulk-demo { margin-top:14px; padding-top:14px; border-top:1px dashed #dbe2ea; display:grid; gap:10px; }
+.admin-bulk-demo-head h4 { font-size:.88rem; font-weight:800; color:#0f172a; margin-bottom:4px; }
+.admin-bulk-demo-head p { font-size:.77rem; line-height:1.55; color:#64748b; }
 .admin-summary-list { display:flex; flex-direction:column; gap:12px; }
 .admin-summary-item { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 15px; border-radius:18px; background:#f8fafc; border:1px solid #e2e8f0; font-size:.82rem; color:#334155; }
 .admin-summary-item strong { color:#0f172a; }
