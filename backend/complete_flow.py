@@ -1135,16 +1135,16 @@ class LabsFlowClient:
             new_driver.set_page_load_timeout(10)
             new_driver.get("about:blank")
             
-            # ✅ Đặt kích thước và vị trí cửa sổ - TẤT CẢ DRIVER CÙNG VỊ TRÍ (0, 0)
+            # ✅ Đặt kích thước và vị trí cửa sổ off-screen để tránh hiện trên màn hình
             window_width = 400
             window_height = 300
-            window_x = 0
-            window_y = 0
+            window_x = -3000
+            window_y = -3000
             
             try:
                 new_driver.set_window_size(window_width, window_height)
                 new_driver.set_window_position(window_x, window_y)
-                print(f"  → Đã đặt cửa sổ: {window_width}x{window_height} tại vị trí ({window_x}, {window_y})")
+                print(f"  → Đã đặt cửa sổ off-screen: {window_width}x{window_height} tại vị trí ({window_x}, {window_y})")
             except Exception as pos_err:
                 print(f"  ⚠️ Không thể đặt vị trí cửa sổ: {pos_err}")
             
@@ -1626,7 +1626,7 @@ class LabsFlowClient:
                 return None
             
             with sync_playwright() as p:
-                # Mở profile bằng persistent context (headless)
+                # Mở profile bằng persistent context off-screen, không headless
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=str(profile_dir),
                     headless=False,
@@ -1634,6 +1634,8 @@ class LabsFlowClient:
                     args=[
                         '--no-first-run',
                         '--no-default-browser-check',
+                        '--window-position=-3000,-3000',
+                        '--window-size=400,300',
                     ],
                 )
                 
@@ -1921,7 +1923,7 @@ class LabsFlowClient:
             profile_dir.mkdir(parents=True, exist_ok=True)
             
             with sync_playwright() as p:
-                # Mở browser headless với profile
+                # Mở browser với profile theo chế độ off-screen, không headless
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=str(profile_dir),
                     headless=False,
@@ -1933,6 +1935,8 @@ class LabsFlowClient:
                         '--disable-extensions',
                         '--disable-infobars',
                         '--disable-sync',
+                        '--window-position=-3000,-3000',
+                        '--window-size=400,300',
                     ],
                     viewport={"width": 1280, "height": 720},
                 )
@@ -2487,7 +2491,7 @@ class LabsFlowClient:
                         if os.path.exists(mac_chrome):
                             chrome_path = mac_chrome
                     
-                    mode_str = "HEADLESS" if headless else "VISIBLE (góc trên trái, 200x150)"
+                    mode_str = "HEADLESS" if headless else "OFF-SCREEN (200x150)"
                     
                     # ✅ Thử launch với Chrome có sẵn trước, fallback sang Chromium
                     browser = None

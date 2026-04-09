@@ -218,8 +218,8 @@ class ChromeCDPSession:
         port: int = 0,
         headless: bool = True,
         chrome_path: Optional[str] = None,
-        window_pos: Tuple[int, int] = (0, 0),
-        window_size: Tuple[int, int] = (500, 600),
+        window_pos: Tuple[int, int] = (-3000, -3000),
+        window_size: Tuple[int, int] = (400, 300),
         log_fn=None,
         proxy_server: Optional[str] = None,
         proxy_username: Optional[str] = None,
@@ -838,7 +838,8 @@ class ChromeCDPSession:
                 return []
 
             # Bước 3: Launch Chrome
-            # Nếu cần login → visible (headless=False) để user giải captcha
+            # Nếu cần login → Chrome thật không headless nhưng vẫn off-screen
+            # để giữ đủ hành vi trình duyệt mà không bật cửa sổ lên màn hình.
             # Nếu không cần → headless
             self.headless = not need_login
             self.launch()
@@ -865,7 +866,7 @@ class ChromeCDPSession:
 
             # Bước 5: Login nếu cần
             if need_login:
-                self.log_fn(f"   🔐 Cần đăng nhập (browser hiển thị để giải captcha)...")
+                self.log_fn(f"   🔐 Cần đăng nhập (Chrome thật off-screen, không headless)...")
                 login_ok = self.do_google_login(email, password)
                 if not login_ok:
                     self.log_fn(f"   ❌ Login thất bại!")
