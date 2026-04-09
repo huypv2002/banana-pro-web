@@ -708,12 +708,49 @@ function toggleAutoDownloadEachImage(enabled) {
 }
 
 function buildImageFilename(url, index) {
-  try {
-    const pathname = new URL(url).pathname || "";
-    const file = pathname.split("/").pop();
-    if (file && file.includes(".")) return file;
-  } catch (_) {}
-  return `image_${String(index + 1).padStart(3, "0")}.png`;
+  const ext = (() => {
+    try {
+      const pathname = new URL(url).pathname || "";
+      const file = pathname.split("/").pop() || "";
+      const match = file.match(/\.([a-z0-9]+)$/i);
+      if (match) return match[1].toLowerCase();
+    } catch (_) {}
+    return "png";
+  })();
+  return buildPromptBasedFilename(index, getPromptTextByIndex(index), ext);
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactPromptStem(prompt, maxLength = 15) {
+  const clean = sanitizeFilenamePart(prompt);
+  if (!clean) return "untitled";
+  if (clean.length <= maxLength) return clean.replace(/\s+/g, "-");
+  const before = clean.slice(0, maxLength + 1);
+  const lastSpace = before.lastIndexOf(" ");
+  if (lastSpace >= 8) return before.slice(0, lastSpace).replace(/\s+/g, "-");
+  const afterSpace = clean.indexOf(" ", maxLength);
+  if (afterSpace !== -1 && afterSpace <= maxLength + 6) {
+    return clean.slice(0, afterSpace).replace(/\s+/g, "-");
+  }
+  return clean.slice(0, maxLength).replace(/\s+/g, "-");
+}
+
+function getPromptTextByIndex(index) {
+  const allPrompts = batchFiles.flatMap(f => f.prompts);
+  return allPrompts[index] || "";
+}
+
+function buildPromptBasedFilename(index, prompt, ext) {
+  const stem = compactPromptStem(prompt, 15);
+  return `${index + 1}_${stem}.${ext}`;
 }
 
 async function autoDownloadFinishedImages(job) {
@@ -1578,8 +1615,11 @@ function updateResultsFromJob(job) {
     if (img.url) {
       row.className = "row-done";
       cells[3].innerHTML = '<span class="status-ok">✅ Xong</span>';
+      const originalName = buildImageFilename(img.url, idx);
+      const upscaleUrl = img.upscaled ? `${VPS_BASE}${img.upscaled}` : "";
+      const upscaleName = img.upscaled ? buildImageFilename(upscaleUrl, idx) : "";
       cells[4].innerHTML = `<img src="${img.url}" class="result-thumb" onclick="window.open(this.src)" onerror="this.outerHTML='❌'"/>
-        <div class="result-actions"><a href="${img.url}" target="_blank">🔗</a>${img.upscaled ? ` <a href="${VPS_BASE}${img.upscaled}" download>⬇${document.getElementById("resolutionSelect")?.value?.toUpperCase() || "HD"}</a>` : ""}</div>`;
+        <div class="result-actions"><a href="${img.url}" target="_blank" download="${originalName}">🔗</a>${img.upscaled ? ` <a href="${upscaleUrl}" download="${upscaleName}">⬇${document.getElementById("resolutionSelect")?.value?.toUpperCase() || "HD"}</a>` : ""}</div>`;
     } else {
       row.className = "row-error";
       cells[3].innerHTML = '<span class="status-err">❌ Lỗi</span>';
