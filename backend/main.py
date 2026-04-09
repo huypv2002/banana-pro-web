@@ -80,17 +80,12 @@ def get_client_with_fallback(cookies_dict: dict):
 
 @app.on_event("startup")
 def startup_event():
-    """Pre-warm Chrome CDP on all profiles."""
+    """Không khởi động hàng loạt profile khi boot; chỉ mở khi có yêu cầu thật."""
     profiles = get_all_profiles()
     if not profiles:
+        logger.info("Chrome CDP startup: chưa có profile nào sẵn sàng.")
         return
-    logger.info(f"Pre-warming Chrome CDP with {len(profiles)} profile(s): {[Path(p).name for p in profiles]}")
-    for profile in profiles:
-        try:
-            LabsFlowClient._ensure_zendriver_worker(profile_path=profile)
-            logger.info(f"Chrome CDP ready: {Path(profile).name}")
-        except Exception as e:
-            logger.warning(f"Chrome CDP pre-warm failed ({Path(profile).name}): {e}")
+    logger.info(f"Chrome CDP startup: phát hiện {len(profiles)} profile(s), sẽ khởi động theo nhu cầu.")
 
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
@@ -356,7 +351,7 @@ class RecaptchaRequest(BaseModel):
 
 @app.post("/recaptcha-token")
 def get_recaptcha_token(req: RecaptchaRequest):
-    """Lấy reCAPTCHA token từ Chrome headless trên VPS. Thử nhiều profiles."""
+    """Lấy reCAPTCHA token từ Chrome thật trên VPS. Thử profile phù hợp và fallback khi cần."""
     try:
         cookies = _parse_cookie_input(req.cookie)
         if not cookies:

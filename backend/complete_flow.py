@@ -454,6 +454,8 @@ class LabsFlowClient:
     _zendriver_consecutive_403: Dict[str, int] = {}    # {cookie_hash: count} - giữ cho compat
     _chrome_cdp_consecutive_403: Dict[str, int] = {}   # {cookie_hash: count}
     _playwright_consecutive_403: Dict[str, int] = {}   # {cookie_hash: count}
+    _chrome_cdp_profile_403: Dict[str, int] = {}       # {profile_path: count}
+    _cookie_profile_fallbacks: Dict[str, str] = {}     # {cookie_hash: fallback_profile_path}
     MAX_ZENDRIVER_403 = 3   # Giữ cho compat
     MAX_CHROME_CDP_403 = 3  # Sau 3 lần 403 liên tiếp từ Chrome CDP → chuyển sang playwright
     MAX_PLAYWRIGHT_403 = 3  # Sau 3 lần 403 liên tiếp từ playwright → reset cookie
@@ -516,8 +518,51 @@ class LabsFlowClient:
     def set_headless_mode(cls, headless: bool):
         """Đặt chế độ headless cho reCAPTCHA browser."""
         cls._global_headless_mode = headless
-        mode_str = "HEADLESS" if headless else "OFF-SCREEN"
+        mode_str = "HEADLESS" if headless else "VISIBLE"
         print(f"  ✅ reCAPTCHA mode: LOCAL BROWSER ({mode_str})")
+
+    @classmethod
+    def _list_available_profile_paths(cls) -> List[str]:
+        """Lấy danh sách profile có cookie hợp lệ trên máy."""
+        base_dir = os.environ.get("PROFILES_DIR", r"C:\BananaPro\chrome_profiles").strip()
+        d = Path(base_dir)
+        if not d.is_dir():
+            fallback = os.environ.get("CHROME_PROFILE_PATH")
+            return [fallback] if fallback else []
+        profiles: List[str] = []
+        for p in sorted(d.iterdir()):
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            for cookies in (p / "Default" / "Network" / "Cookies", p / "Default" / "Cookies"):
+                try:
+                    if cookies.exists() and cookies.stat().st_size > 0:
+                        profiles.append(str(p))
+                        break
+                except Exception:
+                    continue
+        return profiles
+
+    @classmethod
+    def _pick_alternate_profile(cls, current_profile: Optional[str]) -> Optional[str]:
+        """Chọn profile khác khi profile hiện tại bị 403 liên tiếp."""
+        profiles = cls._list_available_profile_paths()
+        if not profiles:
+            return current_profile
+        preferred = []
+        degraded = []
+        for profile in profiles:
+            if profile == current_profile:
+                continue
+            score = cls._chrome_cdp_profile_403.get(profile, 0)
+            if score < cls.MAX_CHROME_CDP_403:
+                preferred.append(profile)
+            else:
+                degraded.append(profile)
+        if preferred:
+            return preferred[0]
+        if degraded:
+            return degraded[0]
+        return current_profile
     
     # ═══════════════════════════════════════════════════════════════════════
     # ✅ AUTO COOKIE RENEWAL - Tự động lấy cookie mới khi bị 403
@@ -1543,6 +1588,10 @@ class LabsFlowClient:
     
     def _get_profile_path_for_cookie(self) -> Optional[str]:
         """Lấy profile path cho cookie này (nếu có)."""
+        if hasattr(LabsFlowClient, '_cookie_profile_fallbacks'):
+            fallback = LabsFlowClient._cookie_profile_fallbacks.get(self._cookie_hash)
+            if fallback:
+                return fallback
         if hasattr(LabsFlowClient, '_cookie_profile_paths'):
             return LabsFlowClient._cookie_profile_paths.get(self._cookie_hash)
         return self.profile_path
@@ -3384,9 +3433,9 @@ class LabsFlowClient:
                 "--disable-popup-blocking",
                 "--metrics-recording-only",
                 "--no-service-autorun",
-                # Off-screen window
-                "--window-position=-3000,-3000",
-                "--window-size=400,300",
+                # Hiện cửa sổ thật để tiện theo dõi captcha và token
+                "--window-position=80,80",
+                "--window-size=1280,900",
             ]
             
             try:
@@ -4030,6 +4079,10 @@ class LabsFlowClient:
         LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = 0
         LabsFlowClient._playwright_consecutive_403[cookie_hash] = 0
+        profile_path = self._get_profile_path_for_cookie()
+        if profile_path:
+            LabsFlowClient._chrome_cdp_profile_403[profile_path] = 0
+        LabsFlowClient._cookie_profile_fallbacks.pop(cookie_hash, None)
         self._reset_all_error_counters()
         # ✅ Reset 403 refresh retries khi thành công
         if hasattr(self, '_403_refresh_retries'):
@@ -4046,6 +4099,16 @@ class LabsFlowClient:
             # Compat: cũng update zendriver counter
             LabsFlowClient._zendriver_consecutive_403[cookie_hash] = count
             print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
+            profile_path = self._get_profile_path_for_cookie()
+            if profile_path:
+                pcount = LabsFlowClient._chrome_cdp_profile_403.get(profile_path, 0) + 1
+                LabsFlowClient._chrome_cdp_profile_403[profile_path] = pcount
+                print(f"  📊 [Profile] {Path(profile_path).name} 403 count: {pcount}/{self.MAX_CHROME_CDP_403}")
+                if pcount >= self.MAX_CHROME_CDP_403:
+                    alternate = LabsFlowClient._pick_alternate_profile(profile_path)
+                    if alternate and alternate != profile_path:
+                        LabsFlowClient._cookie_profile_fallbacks[cookie_hash] = alternate
+                        print(f"  🔄 [Profile] {Path(profile_path).name} bị 403 liên tiếp, chuyển sang profile: {Path(alternate).name}")
         elif source == "zendriver":
             # Backward compat
             count = LabsFlowClient._zendriver_consecutive_403.get(cookie_hash, 0) + 1
@@ -4102,7 +4165,7 @@ class LabsFlowClient:
         
         # ✅ SOURCE 1: Chrome CDP (ưu tiên - Chrome thật, trust score cao)
         if self._should_use_zendriver():
-            print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, off-screen)...")
+            print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, có cửa sổ)...")
             try:
                 token = self._get_recaptcha_token_zendriver(
                     timeout_s=60,
