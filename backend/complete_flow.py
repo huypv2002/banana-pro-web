@@ -790,6 +790,30 @@ class LabsFlowClient:
         return profile_key, instance
 
     @classmethod
+    def _make_chrome_cdp_session_key(cls, cookie_hash: str, profile_key: Optional[str] = None) -> str:
+        if profile_key:
+            return f"{profile_key}::{cookie_hash}"
+        return cookie_hash
+
+    @classmethod
+    def _iter_chrome_cdp_session_keys(cls, cookie_hash: str) -> list[str]:
+        keys = [cookie_hash]
+        suffix = f"::{cookie_hash}"
+        for key in list(cls._chrome_cdp_pages.keys()):
+            if key.endswith(suffix):
+                keys.append(key)
+        for key in list(cls._chrome_cdp_ws_conns.keys()):
+            if key.endswith(suffix):
+                keys.append(key)
+        deduped = []
+        seen = set()
+        for key in keys:
+            if key not in seen:
+                seen.add(key)
+                deduped.append(key)
+        return deduped
+
+    @classmethod
     def _cleanup_chrome_cdp(cls, profile_key: Optional[str] = None):
         """Đóng Chrome CDP process và cleanup resources.
 
@@ -2271,27 +2295,33 @@ class LabsFlowClient:
     @classmethod
     def _zendriver_reset_page(cls, cookie_hash: str):
         """Reset page/tab cho cookie (khi cần re-inject cookies)."""
-        old_ws = cls._chrome_cdp_ws_conns.pop(cookie_hash, None)
-        if old_ws:
-            try:
-                old_ws.close()
-            except Exception:
-                pass
-        cls._chrome_cdp_ws_msg_ids.pop(cookie_hash, None)
-        cls._chrome_cdp_page_ready.pop(cookie_hash, None)
-        
-        tab_id = cls._chrome_cdp_tab_ids.pop(cookie_hash, None)
-        port = cls._chrome_cdp_cookie_ports.get(cookie_hash)
-        if tab_id and port:
-            try:
-                requests.get(
-                    f"http://127.0.0.1:{port}/json/close/{tab_id}",
-                    timeout=3,
-                )
-            except Exception:
-                pass
-        cls._chrome_cdp_pages.pop(cookie_hash, None)
-        cls._chrome_cdp_cookies_injected.pop(cookie_hash, None)
+        for session_key in cls._iter_chrome_cdp_session_keys(cookie_hash):
+            old_ws = cls._chrome_cdp_ws_conns.pop(session_key, None)
+            if old_ws:
+                try:
+                    old_ws.close()
+                except Exception:
+                    pass
+            cls._chrome_cdp_ws_msg_ids.pop(session_key, None)
+            cls._chrome_cdp_page_ready.pop(session_key, None)
+            
+            tab_id = cls._chrome_cdp_tab_ids.pop(session_key, None)
+            port = cls._chrome_cdp_cookie_ports.get(session_key) or cls._chrome_cdp_cookie_ports.get(cookie_hash)
+            if tab_id and port:
+                try:
+                    requests.get(
+                        f"http://127.0.0.1:{port}/json/close/{tab_id}",
+                        timeout=3,
+                    )
+                except Exception:
+                    pass
+            cls._chrome_cdp_pages.pop(session_key, None)
+            cls._chrome_cdp_cookies_injected.pop(session_key, None)
+            cls._chrome_cdp_cookie_profiles.pop(session_key, None)
+            cls._chrome_cdp_cookie_ports.pop(session_key, None)
+            cls._zendriver_pages.pop(session_key, None)
+            cls._zendriver_cookies_injected.pop(session_key, None)
+
         cls._chrome_cdp_cookie_profiles.pop(cookie_hash, None)
         cls._chrome_cdp_cookie_ports.pop(cookie_hash, None)
         cls._zendriver_pages.pop(cookie_hash, None)
@@ -2321,9 +2351,10 @@ class LabsFlowClient:
             if not port:
                 print("  ⚠️ [Chrome CDP] Chrome chưa sẵn sàng")
                 return None
+            session_key = LabsFlowClient._make_chrome_cdp_session_key(cookie_hash, profile_key)
 
-            LabsFlowClient._chrome_cdp_cookie_profiles[cookie_hash] = profile_key
-            LabsFlowClient._chrome_cdp_cookie_ports[cookie_hash] = port
+            LabsFlowClient._chrome_cdp_cookie_profiles[session_key] = profile_key
+            LabsFlowClient._chrome_cdp_cookie_ports[session_key] = port
 
             SITE_KEY = "6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV"
             TARGET_URL = "https://labs.google/fx/tools/flow"
@@ -2350,7 +2381,7 @@ class LabsFlowClient:
                 """Lấy persistent WS connection hoặc tạo mới."""
                 import websockets.sync.client as ws_sync
 
-                existing = LabsFlowClient._chrome_cdp_ws_conns.get(cookie_hash)
+                existing = LabsFlowClient._chrome_cdp_ws_conns.get(session_key)
                 if existing is not None:
                     try:
                         existing.ping()
@@ -2360,12 +2391,12 @@ class LabsFlowClient:
                             existing.close()
                         except Exception:
                             pass
-                        LabsFlowClient._chrome_cdp_ws_conns.pop(cookie_hash, None)
+                        LabsFlowClient._chrome_cdp_ws_conns.pop(session_key, None)
                 
                 try:
                     conn = ws_sync.connect(ws_url, close_timeout=5, open_timeout=10)
-                    LabsFlowClient._chrome_cdp_ws_conns[cookie_hash] = conn
-                    LabsFlowClient._chrome_cdp_ws_msg_ids[cookie_hash] = 1
+                    LabsFlowClient._chrome_cdp_ws_conns[session_key] = conn
+                    LabsFlowClient._chrome_cdp_ws_msg_ids[session_key] = 1
                     return conn
                 except Exception as e:
                     print(f"  ⚠️ [Chrome CDP] WS connect failed: {e}")
@@ -2373,11 +2404,11 @@ class LabsFlowClient:
 
             def _cdp_send(ws, method: str, params: dict = None, cmd_timeout: float = 30) -> dict:
                 """Gửi CDP command và nhận response. Per-command timeout."""
-                msg_id = LabsFlowClient._chrome_cdp_ws_msg_ids.get(cookie_hash, 1)
+                msg_id = LabsFlowClient._chrome_cdp_ws_msg_ids.get(session_key, 1)
                 payload = {"id": msg_id, "method": method}
                 if params:
                     payload["params"] = params
-                LabsFlowClient._chrome_cdp_ws_msg_ids[cookie_hash] = msg_id + 1
+                LabsFlowClient._chrome_cdp_ws_msg_ids[session_key] = msg_id + 1
 
                 ws.send(json.dumps(payload))
 
@@ -2399,9 +2430,9 @@ class LabsFlowClient:
                 return {}
 
             try:
-                ws_url = LabsFlowClient._chrome_cdp_pages.get(cookie_hash)
+                ws_url = LabsFlowClient._chrome_cdp_pages.get(session_key)
                 need_navigate = False
-                page_ready = LabsFlowClient._chrome_cdp_page_ready.get(cookie_hash, False)
+                page_ready = LabsFlowClient._chrome_cdp_page_ready.get(session_key, False)
 
                 if ws_url is None:
                     result = _create_new_tab()
@@ -2409,12 +2440,12 @@ class LabsFlowClient:
                         print("  ⚠️ [Chrome CDP] Không tạo được tab mới")
                         return None
                     ws_url, tab_id = result
-                    LabsFlowClient._chrome_cdp_pages[cookie_hash] = ws_url
-                    LabsFlowClient._chrome_cdp_tab_ids[cookie_hash] = tab_id
-                    LabsFlowClient._chrome_cdp_cookies_injected[cookie_hash] = False
-                    LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = False
-                    LabsFlowClient._zendriver_pages[cookie_hash] = ws_url
-                    LabsFlowClient._zendriver_cookies_injected[cookie_hash] = False
+                    LabsFlowClient._chrome_cdp_pages[session_key] = ws_url
+                    LabsFlowClient._chrome_cdp_tab_ids[session_key] = tab_id
+                    LabsFlowClient._chrome_cdp_cookies_injected[session_key] = False
+                    LabsFlowClient._chrome_cdp_page_ready[session_key] = False
+                    LabsFlowClient._zendriver_pages[session_key] = ws_url
+                    LabsFlowClient._zendriver_cookies_injected[session_key] = False
                     need_navigate = True
                     page_ready = False
                     print(f"  📄 [Chrome CDP] Tạo tab mới cho cookie {cookie_hash[:8]}...")
@@ -2423,19 +2454,19 @@ class LabsFlowClient:
                 if ws is None:
                     print("  🔄 [Chrome CDP] WS stale, tạo tab mới...")
                     LabsFlowClient._zendriver_reset_page(cookie_hash)
-                    LabsFlowClient._chrome_cdp_ws_conns.pop(cookie_hash, None)
+                    LabsFlowClient._chrome_cdp_ws_conns.pop(session_key, None)
 
                     result = _create_new_tab()
                     if not result:
                         print("  ⚠️ [Chrome CDP] Không tạo được tab mới (retry)")
                         return None
                     ws_url, tab_id = result
-                    LabsFlowClient._chrome_cdp_pages[cookie_hash] = ws_url
-                    LabsFlowClient._chrome_cdp_tab_ids[cookie_hash] = tab_id
-                    LabsFlowClient._chrome_cdp_cookies_injected[cookie_hash] = False
-                    LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = False
-                    LabsFlowClient._zendriver_pages[cookie_hash] = ws_url
-                    LabsFlowClient._zendriver_cookies_injected[cookie_hash] = False
+                    LabsFlowClient._chrome_cdp_pages[session_key] = ws_url
+                    LabsFlowClient._chrome_cdp_tab_ids[session_key] = tab_id
+                    LabsFlowClient._chrome_cdp_cookies_injected[session_key] = False
+                    LabsFlowClient._chrome_cdp_page_ready[session_key] = False
+                    LabsFlowClient._zendriver_pages[session_key] = ws_url
+                    LabsFlowClient._zendriver_cookies_injected[session_key] = False
                     need_navigate = True
                     page_ready = False
 
@@ -2446,7 +2477,7 @@ class LabsFlowClient:
                 has_profile = profile_key != "__default__"
                 profile_cookies_ok = False
 
-                if has_profile and need_navigate and not LabsFlowClient._chrome_cdp_cookies_injected.get(cookie_hash, False):
+                if has_profile and need_navigate and not LabsFlowClient._chrome_cdp_cookies_injected.get(session_key, False):
                     print(f"  🌐 [Chrome CDP] Navigate (profile mode) đến {TARGET_URL}...")
                     _cdp_send(ws, "Page.enable", cmd_timeout=5)
                     _cdp_send(ws, "Page.navigate", {"url": TARGET_URL}, cmd_timeout=15)
@@ -2473,8 +2504,8 @@ class LabsFlowClient:
                         if "accounts.google" not in current_url and "signin" not in current_url.lower():
                             print(f"  ✅ [Chrome CDP] Profile cookies hợp lệ, không cần inject CDP cookies")
                             profile_cookies_ok = True
-                            LabsFlowClient._chrome_cdp_cookies_injected[cookie_hash] = True
-                            LabsFlowClient._zendriver_cookies_injected[cookie_hash] = True
+                            LabsFlowClient._chrome_cdp_cookies_injected[session_key] = True
+                            LabsFlowClient._zendriver_cookies_injected[session_key] = True
                             need_navigate = False
                             page_ready = False
                         else:
@@ -2482,7 +2513,7 @@ class LabsFlowClient:
                     except Exception:
                         pass
 
-                if not profile_cookies_ok and not LabsFlowClient._chrome_cdp_cookies_injected.get(cookie_hash, False):
+                if not profile_cookies_ok and not LabsFlowClient._chrome_cdp_cookies_injected.get(session_key, False):
                     _cdp_send(ws, "Network.enable", cmd_timeout=10)
 
                     inject_success = 0
@@ -2553,8 +2584,8 @@ class LabsFlowClient:
                     except Exception as e:
                         print(f"  ⚠️ [Chrome CDP] Không verify được cookies: {e}")
 
-                    LabsFlowClient._chrome_cdp_cookies_injected[cookie_hash] = True
-                    LabsFlowClient._zendriver_cookies_injected[cookie_hash] = True
+                    LabsFlowClient._chrome_cdp_cookies_injected[session_key] = True
+                    LabsFlowClient._zendriver_cookies_injected[session_key] = True
                     need_navigate = True
                     page_ready = False
                     print(f"  🍪 [Chrome CDP] Đã inject {inject_success} cookies OK, {inject_fail} failed")
@@ -2589,8 +2620,8 @@ class LabsFlowClient:
                     if "accounts.google" in current_url or "signin" in current_url.lower():
                         print(f"  ⚠️ [Chrome CDP] Redirected to login - cookie expired")
                         LabsFlowClient._zendriver_reset_page(cookie_hash)
-                        LabsFlowClient._chrome_cdp_page_ready.pop(cookie_hash, None)
-                        LabsFlowClient._chrome_cdp_ws_conns.pop(cookie_hash, None)
+                        LabsFlowClient._chrome_cdp_page_ready.pop(session_key, None)
+                        LabsFlowClient._chrome_cdp_ws_conns.pop(session_key, None)
                         try:
                             ws.close()
                         except Exception:
@@ -2627,7 +2658,7 @@ class LabsFlowClient:
 
                     if not gre_loaded:
                         print(f"  ⚠️ [Chrome CDP] grecaptcha not loaded after {time.time()-start_wait:.0f}s")
-                        LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = False
+                        LabsFlowClient._chrome_cdp_page_ready[session_key] = False
                         return None
 
                 exec_js = """(async () => {
@@ -2654,28 +2685,28 @@ class LabsFlowClient:
 
                 val = exec_result.get("result", {}).get("result", {}).get("value")
                 if isinstance(val, str) and not val.startswith("ERROR:") and len(val) > 20:
-                    LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = True
+                    LabsFlowClient._chrome_cdp_page_ready[session_key] = True
                     print(f"  ✅ [Chrome CDP] Token OK (len={len(val)})")
                     return val
                 if isinstance(val, str) and val.startswith("ERROR:"):
                     print(f"  ⚠️ [Chrome CDP] reCAPTCHA error: {val[6:]}")
-                    LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = False
+                    LabsFlowClient._chrome_cdp_page_ready[session_key] = False
                 else:
                     print(f"  ⚠️ [Chrome CDP] Unexpected result: {val}")
-                    LabsFlowClient._chrome_cdp_page_ready[cookie_hash] = False
+                    LabsFlowClient._chrome_cdp_page_ready[session_key] = False
                 return None
 
             except Exception as e:
                 print(f"  ⚠️ [Chrome CDP] Error: {e}")
                 import traceback
                 traceback.print_exc()
-                old_ws = LabsFlowClient._chrome_cdp_ws_conns.pop(cookie_hash, None)
+                old_ws = LabsFlowClient._chrome_cdp_ws_conns.pop(session_key, None)
                 if old_ws:
                     try:
                         old_ws.close()
                     except Exception:
                         pass
-                LabsFlowClient._chrome_cdp_page_ready.pop(cookie_hash, None)
+                LabsFlowClient._chrome_cdp_page_ready.pop(session_key, None)
                 return None
     
     def _record_token_source(self, source: str):
