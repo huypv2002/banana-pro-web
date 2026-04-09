@@ -224,6 +224,7 @@ async function handleLogin(request, env) {
   ).bind(username, hash).first();
   if (!user) return err("Sai tài khoản hoặc mật khẩu", 401);
   const token = genToken();
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id).run();
   await env.DB.prepare(
     "INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,datetime('now','+7 days'))"
   ).bind(token, user.id).run();
@@ -240,6 +241,7 @@ async function handleRegister(request, env) {
     // Auto login
     const user = await env.DB.prepare("SELECT id,username,role FROM users WHERE username=?").bind(username).first();
     const token = genToken();
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id).run();
     await env.DB.prepare(
       "INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,datetime('now','+7 days'))"
     ).bind(token, user.id).run();
@@ -278,6 +280,7 @@ async function handleChangePassword(request, env) {
   if (!check) return err("Mật khẩu cũ không đúng");
   const newHash = await sha256(new_password);
   await env.DB.prepare("UPDATE users SET password_hash=? WHERE id=?").bind(newHash, user.user_id).run();
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.user_id).run();
   return json({ ok: true });
 }
 
