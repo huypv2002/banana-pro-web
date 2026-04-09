@@ -111,6 +111,7 @@ class ChromeThread(QThread):
 class BatchLoginThread(QThread):
     log = Signal(str)
     progress = Signal(str)
+    refresh = Signal()
     finished = Signal(int, int)
 
     def __init__(self, accounts):
@@ -125,6 +126,7 @@ class BatchLoginThread(QThread):
             profile_path = Path(PROFILES_DIR) / email
             profile_path.mkdir(parents=True, exist_ok=True)
             save_profile_info(str(profile_path), email=email, status="processing")
+            self.refresh.emit()
             self.progress.emit(f"[{idx}/{total}] Đang xử lý {email}")
             session = None
             try:
@@ -133,6 +135,8 @@ class BatchLoginThread(QThread):
                     profile_path=str(profile_path),
                     headless=False,
                     chrome_path=CHROME_PATH,
+                    window_pos=(120, 80),
+                    window_size=(1280, 900),
                     log_fn=lambda msg, mail=email: self.log.emit(f"{mail}: {msg}"),
                 )
                 cookies = session.extract_cookies(email=email, password=password, force_login=True)
@@ -144,10 +148,12 @@ class BatchLoginThread(QThread):
                     save_profile_info(str(profile_path), email=email, status="failed")
                     self.log.emit(f"❌ {email}: không lấy được cookies")
                     failed += 1
+                self.refresh.emit()
             except Exception as ex:
                 save_profile_info(str(profile_path), email=email, status="failed")
                 self.log.emit(f"❌ {email}: lỗi {str(ex)[:160]}")
                 failed += 1
+                self.refresh.emit()
             finally:
                 if session:
                     try:
@@ -366,7 +372,16 @@ class ProfileManager(QMainWindow):
         self.batch_thread = BatchLoginThread(accounts)
         self.batch_thread.log.connect(self.set_status)
         self.batch_thread.progress.connect(self.set_status)
+        self.batch_thread.refresh.connect(self.refresh_table)
         self.batch_thread.finished.connect(self.on_batch_finished)
+
+        # Tạo/sync profile rows ngay từ đầu để grid hiện tức thì
+        for email, _password in accounts:
+            profile_path = Path(PROFILES_DIR) / email
+            profile_path.mkdir(parents=True, exist_ok=True)
+            save_profile_info(str(profile_path), email=email, status="queued")
+        self.refresh_table()
+
         self.batch_thread.start()
         self.set_status(f"🚀 Bắt đầu tự động đăng nhập {len(accounts)} tài khoản...")
 
