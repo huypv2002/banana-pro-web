@@ -1536,7 +1536,13 @@ function setLoading(on) {
 function updateProgress(job) {
   const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
   document.getElementById("progressFill").style.width = pct + "%";
-  document.getElementById("progressText").textContent = `${job.completed} / ${job.total} ảnh (${pct}%)`;
+  
+  if (job.queue_position > 0) {
+    document.getElementById("progressText").textContent = `⏳ Đang xếp hàng (Còn ${job.queue_position} lượt trước bạn) - ${job.completed} / ${job.total} ảnh (${pct}%)`;
+  } else {
+    document.getElementById("progressText").textContent = `${job.completed} / ${job.total} ảnh (${pct}%)`;
+  }
+  
   const labels = { pending: "Chờ", running: "Đang chạy", done: "Hoàn thành", error: "Lỗi" };
   const badge = document.getElementById("progressBadge");
   badge.className = `badge badge-${job.status}`; badge.textContent = labels[job.status] || job.status;
