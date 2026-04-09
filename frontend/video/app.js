@@ -1,4 +1,5 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
+const VPS_BASE = "https://api.sunnshineshop.asia";
 const STORAGE_TOKEN_KEY = "bp_token";
 const STORAGE_USER_KEY = "bp_user";
 const LEGACY_TOKEN_KEYS = ["bp_token", "bp_image_token", "bp_video_token"];
@@ -9,6 +10,17 @@ function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmBut
 function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
+const ADMIN_CONTACT_HTML = `
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+    <a href="https://zalo.me/0822922996" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:14px;background:#e0f2fe;border:1px solid #7dd3fc;color:#0369a1;font-weight:700;text-decoration:none">
+      <span>Zalo</span>
+      <span>0822.922.996</span>
+    </a>
+    <a href="https://t.me/mavnhuy1" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:14px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:700;text-decoration:none">
+      <span>Telegram</span>
+      <span>@mavnhuy1</span>
+    </a>
+  </div>`;
 function planScopeLabel(scope) { return scope === "image" ? "Chỉ ảnh" : scope === "video" ? "Chỉ video" : "Ảnh + Video"; }
 function hasFeatureAccess(feature) {
   if (!authUser) return false;
@@ -24,6 +36,11 @@ function showUpgradePopup(feature = "video") {
     html: `<div style="text-align:left;font-size:0.92rem;line-height:1.7">
       <p>Anh/chị đang dùng gói <b>${planScopeLabel(authUser?.plan_scope || "both")}</b>, nên tính năng <b>${targetLabel}</b> tạm thời chưa khả dụng.</p>
       <p>Nếu anh/chị muốn mở thêm tính năng này, chỉ cần nhắn admin giúp em. Bên em sẽ hỗ trợ nâng cấp gói nhanh và gọn để mình dùng mượt ngay ạ.</p>
+      <div style="margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:12px 12px">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:4px">Liên hệ admin để nâng cấp nhanh</div>
+        <div style="font-size:0.85rem;color:#64748b">Chọn kênh thuận tiện nhất cho anh/chị ở dưới đây.</div>
+        ${ADMIN_CONTACT_HTML}
+      </div>
     </div>`,
     confirmButtonColor: "#16a34a",
     confirmButtonText: "Đã hiểu",
@@ -149,6 +166,53 @@ function apiFetch(path, opts = {}) {
   return fetch(API_BASE + path, { ...opts, headers });
 }
 
+function vpsFetch(path, opts = {}) {
+  return fetch(VPS_BASE + path, opts);
+}
+
+function mapServerErrorMessage(message, status, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
+  const raw = String(message || "").trim();
+  if (!raw) {
+    if (status === 401) return "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại để tiếp tục.";
+    if (status === 403) return "Yêu cầu bị từ chối. Vui lòng kiểm tra quyền truy cập, gói dịch vụ hoặc cookie đang dùng.";
+    if (status === 404) return "Không tìm thấy dữ liệu hoặc tính năng mà hệ thống đang cần.";
+    if (status === 408) return "Máy chủ phản hồi quá lâu. Anh/chị vui lòng thử lại sau ít phút.";
+    if (status === 409) return "Dữ liệu đang bị trùng hoặc xung đột, vui lòng kiểm tra lại rồi thử lại.";
+    if (status === 429) return "Hệ thống đang xử lý quá nhiều yêu cầu. Anh/chị vui lòng chờ một chút rồi thử lại.";
+    if (status >= 500) return "Máy chủ đang gặp sự cố tạm thời. Anh/chị vui lòng thử lại sau ít phút.";
+    return fallback;
+  }
+  if (/^HTTP\s*\d+/i.test(raw)) return mapServerErrorMessage("", status || Number(raw.replace(/\D+/g, "")), fallback);
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) return "Không thể kết nối tới máy chủ. Anh/chị vui lòng kiểm tra mạng rồi thử lại.";
+  if (/unauthorized|jwt|token|phiên đăng nhập/i.test(raw)) return "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.";
+  if (/forbidden|permission|not allowed|access denied/i.test(raw)) return "Yêu cầu bị từ chối. Tài khoản hiện chưa có quyền thực hiện thao tác này.";
+  if (/not found|không tìm thấy/i.test(raw)) return raw;
+  if (/too many requests|rate limit|429/i.test(raw)) return "Hệ thống đang bận vì có quá nhiều yêu cầu cùng lúc. Anh/chị vui lòng thử lại sau ít phút.";
+  if (/vps error|upstream|bad gateway|gateway/i.test(raw)) return `Máy chủ xử lý đang gặp lỗi kết nối: ${raw}`;
+  if (/timeout|timed out/i.test(raw)) return "Máy chủ xử lý quá lâu nên yêu cầu đã bị gián đoạn. Anh/chị vui lòng thử lại.";
+  return raw;
+}
+
+async function parseApiError(res, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
+  let payload = null;
+  let text = "";
+  try { payload = await res.clone().json(); } catch (_) {}
+  if (!payload) {
+    try { text = await res.clone().text(); } catch (_) {}
+  }
+  const message =
+    payload?.detail ||
+    payload?.error ||
+    payload?.message ||
+    payload?.msg ||
+    text;
+  return mapServerErrorMessage(message, res.status, fallback);
+}
+
+function parseCaughtError(error, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
+  return mapServerErrorMessage(error?.message || error, 0, fallback);
+}
+
 // ── Auth ──
 (async function init() {
   setMode("t2v"); // populate model select on load
@@ -173,36 +237,11 @@ function showApp() {
   if (autoToggle) autoToggle.checked = autoDownloadEachEnabled;
   loadCookiesFromDB();
   showTab("generate");
-  applyFeatureLock();
 }
 function clearAuth() { authToken = ""; authUser = null; LEGACY_TOKEN_KEYS.forEach(k => localStorage.removeItem(k)); LEGACY_USER_KEYS.forEach(k => localStorage.removeItem(k)); }
 function logout() { clearAuth(); showLogin(); }
 function switchApp(url) {
   window.location.assign(url);
-}
-function applyFeatureLock() {
-  const generateTab = document.getElementById("tabGenerate");
-  if (!generateTab) return;
-  generateTab.classList.toggle("feature-locked", !hasFeatureAccess("video"));
-  let overlay = document.getElementById("featureLockOverlay");
-  if (hasFeatureAccess("video")) {
-    if (overlay) overlay.remove();
-    return;
-  }
-  if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "featureLockOverlay";
-    overlay.className = "feature-lock-overlay";
-    overlay.innerHTML = `<div class="feature-lock-card">
-      <div class="feature-lock-pill">Cần nâng cấp gói</div>
-      <h3>Tính năng video đang được khóa</h3>
-      <p>Anh/chị vẫn xem được toàn bộ giao diện để tham khảo trước. Khi cần mở tính năng video, anh/chị chỉ cần nhắn admin là bên em hỗ trợ nâng cấp gói thật nhanh cho mình ạ.</p>
-      <button class="btn btn-green" type="button">Liên hệ admin để nâng cấp</button>
-    </div>`;
-    overlay.addEventListener("click", () => showUpgradePopup("video"));
-    overlay.querySelector("button")?.addEventListener("click", ev => { ev.stopPropagation(); showUpgradePopup("video"); });
-    generateTab.appendChild(overlay);
-  }
 }
 let authTab = "login";
 function switchAuthTab(tab) {
@@ -216,13 +255,13 @@ async function handleAuth(e) {
   const errEl = document.getElementById("authError"); errEl.style.display = "none";
   try {
     const res = await fetch(API_BASE + (authTab === "login" ? "/auth/login" : "/auth/register"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+    if (!res.ok) { errEl.textContent = await parseApiError(res, "Không thể đăng nhập vào hệ thống video."); errEl.style.display = "block"; return false; }
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || "Lỗi"; errEl.style.display = "block"; return false; }
     authToken = data.token; authUser = { username: data.username, role: data.role };
     localStorage.setItem(STORAGE_TOKEN_KEY, authToken); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
     try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser)); } } catch(_){}
     showApp();
-  } catch (e) { errEl.textContent = "Lỗi kết nối"; errEl.style.display = "block"; }
+  } catch (e) { errEl.textContent = parseCaughtError(e, "Không thể kết nối tới máy chủ để đăng nhập."); errEl.style.display = "block"; }
   return false;
 }
 
@@ -370,12 +409,21 @@ async function addCookie() {
   const parsed = parseCookieInput(raw); if (!parsed || !Object.keys(parsed).length) { sAlert("Cookie không hợp lệ"); return; }
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)))).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
   const res = await apiFetch("/user/cookies", { method: "POST", body: JSON.stringify({ cookie_raw: raw, cookie_hash: hash }) });
-  const data = await res.json(); if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể thêm cookie vào hệ thống video."), "error"); return; }
   document.getElementById("newCookieInput").value = ""; sSuccess("Đã thêm cookie"); loadCookiesFromDB();
 }
-async function deleteCookie(id) { await apiFetch(`/user/cookies/${id}`, { method: "DELETE" }); loadCookiesFromDB(); }
-async function clearAllCookies() { if (!await sConfirm("Xóa tất cả cookie?")) return; await apiFetch("/user/cookies/clear", { method: "DELETE" }); loadCookiesFromDB(); }
-function openCookieModal() { document.getElementById("cookieModal").style.display = "flex"; }
+async function deleteCookie(id) {
+  const res = await apiFetch(`/user/cookies/${id}`, { method: "DELETE" });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa cookie này."), "error"); return; }
+  loadCookiesFromDB();
+}
+async function clearAllCookies() {
+  if (!await sConfirm("Xóa tất cả cookie?")) return;
+  const res = await apiFetch("/user/cookies/clear", { method: "DELETE" });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa toàn bộ cookie."), "error"); return; }
+  loadCookiesFromDB();
+}
+function openCookieModal() { if (!hasFeatureAccess("video")) { showUpgradePopup("video"); return; } document.getElementById("cookieModal").style.display = "flex"; }
 function closeCookieModal() { document.getElementById("cookieModal").style.display = "none"; }
 
 // ── Prompt Sources ──
@@ -388,7 +436,7 @@ function loadTxtFile(input) {
   setBatchFiles([]);
   const reader = new FileReader();
   reader.onload = e => {
-    setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }]);
+    setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "Chờ" }]);
     renderBatchTable();
   };
   reader.readAsText(file);
@@ -406,7 +454,7 @@ function loadFolderTxt(input) {
   files.forEach(file => {
     const r = new FileReader();
     r.onload = e => {
-      nextBatchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" });
+      nextBatchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "Chờ" });
       if (++loaded === files.length) {
         setBatchFiles(nextBatchFiles);
         renderBatchTable();
@@ -501,6 +549,20 @@ function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
 async function startGeneration() {
   if (!hasFeatureAccess("video")) { showUpgradePopup("video"); return; }
   if (!cookies.length) { sAlert("Vui lòng thêm cookie."); return; }
+
+  const oldest = cookies.reduce((min, c) => {
+    const t = c.created_at ? new Date(c.created_at + "Z").getTime() : 0;
+    return t && t < min ? t : min;
+  }, Date.now());
+  const hoursAgo = Math.floor((Date.now() - oldest) / 3600000);
+  if (hoursAgo >= 10) {
+    const ok = await sConfirm(
+      `Cookie đã được thêm ${hoursAgo} giờ trước.\nCookie chỉ có hạn 10-24 giờ, có thể đã hết hạn.\nBạn nên lấy cookie mới trước khi tạo video.`,
+      "Cookie có thể hết hạn"
+    );
+    if (!ok) return;
+  }
+
   const prompts = getBatchFiles().flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
 
@@ -539,17 +601,22 @@ async function startGeneration() {
   try {
     savedVideoHistoryUrls.clear();
     autoDownloadedVideoUrls.clear();
+    const ctxRes = await apiFetch("/user/generate-context?feature=video");
+    if (!ctxRes.ok) throw new Error(await parseApiError(ctxRes, "Không thể lấy cấu hình chạy từ máy chủ."));
+    const ctx = await ctxRes.json();
+
     const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap,
+                   cookie: ctx.cookie, cookie_pool: ctx.cookie_pool || [],
                    delay: parseInt(document.getElementById("delayInput").value) || 3 };
-    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
+    const res = await vpsFetch("/generate-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(await parseApiError(res, "Không thể gửi yêu cầu tạo video lên máy chủ."));
     const job = await res.json();
     currentJobId = job.job_id;
     activeJobMode = currentMode;
     latestJobState = job;
     startPolling();
   } catch (e) {
-    sAlert("Lỗi: " + e.message, "error");
+    sAlert(parseCaughtError(e, "Không thể bắt đầu tác vụ tạo video."), "error");
     document.getElementById("runBtn").disabled = false;
     document.getElementById("stopBtn").disabled = true;
     document.getElementById("progressCard").style.display = "none";
@@ -562,8 +629,16 @@ function startPolling() {
   pollInterval = setInterval(async () => {
     if (!currentJobId) return;
     try {
-      const res = await apiFetch(`/video-jobs/${currentJobId}`);
-      if (!res.ok) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối server", "error"); resetUI(); } return; }
+      const res = await vpsFetch(`/video-jobs/${currentJobId}`);
+      if (!res.ok) {
+        if (++pollFailCount >= 5) {
+          clearInterval(pollInterval);
+          currentJobId = null;
+          sAlert(await parseApiError(res, "Mất kết nối tới máy chủ trong lúc đang lấy tiến độ tạo video."), "error");
+          resetUI();
+        }
+        return;
+      }
       pollFailCount = 0;
       const job = await res.json();
       latestJobState = job;
@@ -583,17 +658,24 @@ function startPolling() {
         persistVideoHistoryIncrementally(job, finishedJobId, finishedMode).catch(() => {});
         if (autoDownloadEachEnabled) autoDownloadFinishedVideos(job).catch(() => {});
         currentJobId = null; resetUI();
-        if (job.status === "error") sAlert(job.error || "Lỗi", "error");
+        if (job.status === "error") sAlert(mapServerErrorMessage(job.error, 500, "Máy chủ trả về lỗi khi đang tạo video."), "error");
         else sSuccess(`Hoàn thành ${job.completed} prompt!`);
       }
-    } catch (e) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối", "error"); resetUI(); } }
+    } catch (e) {
+      if (++pollFailCount >= 5) {
+        clearInterval(pollInterval);
+        currentJobId = null;
+        sAlert(parseCaughtError(e, "Mất kết nối tới máy chủ trong lúc đang lấy tiến độ tạo video."), "error");
+        resetUI();
+      }
+    }
   }, 3000);
 }
 
 async function stopGeneration() {
   if (!currentJobId) return;
   clearInterval(pollInterval);
-  await apiFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
+  await vpsFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
   currentJobId = null; resetUI();
 }
 
@@ -682,11 +764,11 @@ async function showVideoAutoDownloadGuide() {
       <p>Bật tính năng này để mỗi video hoàn thành sẽ tự tải ngay về máy.</p>
       <p style="margin-top:8px"><b>Thiết lập một lần trong Chrome:</b></p>
       <ol style="padding-left:18px">
-        <li>Bấm vào liên kết <a href="#" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống tự động</a></li>
-        <li>Dán <code>chrome://settings/content/automaticDownloads</code> vào thanh địa chỉ</li>
+        <li>Bấm vào liên kết <a href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống</a></li>
+        <li>Nếu Chrome chặn không cho website mở trang này, dán <code>chrome://settings/downloads</code> vào thanh địa chỉ</li>
         <li>Cho phép trang tải nhiều tệp tự động để hệ thống tự tải không hỏi lại</li>
       </ol>
-      <p style="margin-top:8px;color:#64748b">Sau khi bấm vào link trên, nút đóng sẽ hiện ra.</p>
+      <p style="margin-top:8px;color:#64748b">Chrome có thể chặn website mở trực tiếp trang <code>chrome://</code>. Nếu vậy, hệ thống sẽ tự copy sẵn đường dẫn để anh/chị dán nhanh.</p>
     </div>`,
     icon: "info",
     showConfirmButton: true,
@@ -700,9 +782,8 @@ async function showVideoAutoDownloadGuide() {
       const link = document.getElementById("videoAutoDlLink");
       if (link) {
         link.addEventListener("click", async ev => {
-          ev.preventDefault();
-          try { await navigator.clipboard.writeText("chrome://settings/content/automaticDownloads"); } catch (_) {}
-          link.textContent = "Đã copy link cài đặt";
+          try { await navigator.clipboard.writeText("chrome://settings/downloads"); } catch (_) {}
+          link.textContent = "Đã thử mở và copy sẵn đường dẫn";
           if (!linkClicked && confirmBtn) {
             linkClicked = true;
             confirmBtn.style.display = "inline-flex";
@@ -766,6 +847,13 @@ function updateProgress(job) {
   if (sb) { sb.className = `badge badge-${job.status}`; sb.textContent = labels[job.status] || job.status; }
 }
 
+function renderRunningStatus(label = "Đang tạo") {
+  return `<div class="status-progress">
+    <span class="status-progress-label">${esc(label)}</span>
+    <span class="status-progress-track"><span class="status-progress-bar"></span></span>
+  </div>`;
+}
+
 function populateResultsTable() {
   const batchFiles = getBatchFiles();
   const allPrompts = batchFiles.flatMap(f => f.prompts);
@@ -810,7 +898,7 @@ function populateResultsTable() {
         <td><div class="prompt-cell">${esc(text)}</div></td>
         ${hasRef ? `<td style="text-align:center">${refCell}</td>` : ""}
         ${hasEnd ? `<td style="text-align:center">${endCell}</td>` : ""}
-        <td class="status-cell">⏳ Chờ</td>
+        <td class="status-cell">Chờ</td>
         <td>—</td>
       </tr>`;
       idx++;
@@ -858,7 +946,7 @@ function updateResults(job) {
     const row = document.getElementById(`resRow${idx}`);
     if (!row || row.className === "row-done" || row.className === "row-error") continue;
     row.className = "";
-    row.cells[statusCellIdx].innerHTML = "⏳ Chờ";
+    row.cells[statusCellIdx].innerHTML = "Chờ";
     row.cells[videoCellIdx].innerHTML = "—";
   }
 
@@ -873,7 +961,7 @@ function updateResults(job) {
       const row = document.getElementById(`resRow${idx}`);
       if (!row || row.className === "row-done" || row.className === "row-error") return;
       row.className = "row-running";
-      row.cells[statusCellIdx].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
+      row.cells[statusCellIdx].innerHTML = renderRunningStatus("Đang tạo");
       if (pos === 0) row.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
@@ -884,7 +972,7 @@ function updateResults(job) {
     const done = videos.slice(offset, end).filter(v => !!v).length;
     if (done >= f.prompts.length) f.status = videos.slice(offset, end).every(v => v && v.urls?.length) ? "✅ Xong" : "⚠️ Có lỗi";
     else if (done > 0) f.status = `🔄 ${done}/${f.prompts.length}`;
-    else f.status = "⏳ Chờ";
+    else f.status = "Chờ";
     offset = end;
   });
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("");
@@ -935,14 +1023,14 @@ async function fetchHistoryPage() {
   try {
     if (historyView === "folders") {
       const res = await apiFetch(`/user/history/groups?media_type=video&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải danh sách thư mục lịch sử video."));
       const groups = await res.json();
       renderHistoryFolders(groups, grid, "📁", g => g.batch_name || g.job_id, g => `${g.model || ""} · ${g.count} video`, g => openHistoryJob(g.job_id, g.batch_name || g.job_id), g => deleteHistoryJob(g.job_id));
       prevBtn.disabled = historyPage === 0;
       nextBtn.disabled = groups.length < HISTORY_LIMIT;
     } else if (historyView === "files") {
       const res = await apiFetch(`/user/history/subgroups?media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải danh sách file trong lịch sử video."));
       const subs = await res.json();
       if (subs.length <= 1) {
         historyView = "videos";
@@ -956,7 +1044,7 @@ async function fetchHistoryPage() {
     } else {
       const qs = `media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}&file_name=${encodeURIComponent(historyCurrentFile || "")}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`;
       const res = await apiFetch(`/user/history?${qs}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải video trong lịch sử."));
       const items = await res.json();
       renderVideoHistoryGrid(items, grid);
       prevBtn.disabled = historyPage === 0;
@@ -964,7 +1052,7 @@ async function fetchHistoryPage() {
     }
     pageInfo.textContent = `Trang ${historyPage + 1}`;
   } catch (e) {
-    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Lỗi tải lịch sử</div></div>';
+    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📜</div><div>${esc(parseCaughtError(e, "Không thể tải lịch sử video lúc này."))}</div></div>`;
   } finally {
     historyLoading = false;
   }
@@ -1256,8 +1344,7 @@ async function adminAddUser() {
   const cookieQuota = parseInt(document.getElementById("adminNewCookieQuota")?.value || "5") || 5;
   if (!username || !password) { sAlert("Thiếu username/password"); return; }
   const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota, plan_scope: planScope }) });
-  const data = await res.json();
-  if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể tạo tài khoản mới."), "error"); return; }
   document.getElementById("adminNewUser").value = "";
   document.getElementById("adminNewPass").value = "";
   if (document.getElementById("adminNewPlanScope")) document.getElementById("adminNewPlanScope").value = "both";
@@ -1265,9 +1352,22 @@ async function adminAddUser() {
   loadAdminUsers();
 }
 
-async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
-async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
-async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminChangeRole(id, role) {
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật vai trò người dùng."), "error"); return; }
+  loadAdminUsers();
+}
+async function adminToggleUser(id, disabled) {
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể thay đổi trạng thái tài khoản."), "error"); return; }
+  loadAdminUsers();
+}
+async function adminDelUser(id) {
+  if (!await sConfirm("Xóa user này?")) return;
+  const res = await apiFetch(`/admin/users/${id}`, { method: "DELETE" });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa người dùng này."), "error"); return; }
+  loadAdminUsers();
+}
 async function adminEditUser(id, username, cookieQuota, planScope = "both") {
   const canEditQuota = ["admin", "super_admin"].includes(authUser?.role);
   const result = await Swal.fire({
@@ -1317,23 +1417,25 @@ async function adminEditUser(id, username, cookieQuota, planScope = "both") {
   if (canEditQuota) payload.cookie_quota = result.value.cookie_quota;
   payload.plan_scope = result.value.plan_scope;
   const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(payload) });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) { sAlert(data.error || "Không thể cập nhật user"); return; }
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật thông tin người dùng."), "error"); return; }
   loadAdminUsers();
 }
 async function adminSetPlan(id, days) {
   if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
-  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật thời hạn gói."), "error"); return; }
   loadAdminUsers();
 }
 
 async function adminSetPlanScope(id, planScope) {
-  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_scope: planScope }) });
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_scope: planScope }) });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật loại gói."), "error"); return; }
   loadAdminUsers();
 }
 
 async function adminSetCookieQuota(id, quota) {
-  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ cookie_quota: parseInt(quota) || 1 }) });
+  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ cookie_quota: parseInt(quota) || 1 }) });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật giới hạn cookie."), "error"); return; }
   loadAdminUsers();
 }
 
@@ -1426,7 +1528,8 @@ async function openAdminCookieUser(userId, username) {
 
 async function adminDeleteCookie(id) {
   if (!await sConfirm("Xóa cookie này khỏi hệ thống?")) return;
-  await apiFetch(`/admin/cookies/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`/admin/cookies/${id}`, { method: "DELETE" });
+  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa cookie khỏi hệ thống."), "error"); return; }
   if (adminCookieUserId) openAdminCookieUser(adminCookieUserId, document.getElementById("adminCookieTitle").textContent.replace("Kho cookie của ", ""));
 }
 

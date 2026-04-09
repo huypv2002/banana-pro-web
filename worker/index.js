@@ -48,6 +48,7 @@ export default {
 
     // ── User cookie routes ──
     if (path === "/user/cookies" && request.method === "GET") return getUserCookies(request, env);
+    if (path === "/user/generate-context" && request.method === "GET") return getUserGenerateContext(request, env, url);
     if (path === "/user/cookies" && request.method === "POST") return addUserCookie(request, env);
     if (path.startsWith("/user/cookies/") && request.method === "DELETE") return deleteUserCookie(request, env, path);
     if (path === "/user/cookies/clear" && request.method === "DELETE") return clearUserCookies(request, env);
@@ -518,6 +519,33 @@ async function getUserCookies(request, env) {
     "SELECT id,cookie_hash,email,status,created_at FROM user_cookies WHERE user_id=? ORDER BY id"
   ).bind(user.user_id).all();
   return json(results.map(item => ({ ...item, cookie_quota: info?.cookie_quota ?? 5 })));
+}
+
+async function getUserGenerateContext(request, env, url) {
+  const [user, e] = await requireUser(request, env);
+  if (e) return e;
+  await ensureUserSchema(env);
+  const feature = url.searchParams.get("feature") === "video" ? "video" : "image";
+  const u = await env.DB.prepare("SELECT role,plan_expires_at,cookie_quota,plan_scope FROM users WHERE id=?").bind(user.user_id).first();
+  const effectiveRole = getEffectiveRole({ username: user.username, role: u.role });
+  if (effectiveRole !== "super_admin") {
+    if (!u.plan_expires_at || u.plan_expires_at < new Date().toISOString()) {
+      return err("Gói của bạn đã hết hạn. Vui lòng liên hệ admin để gia hạn.", 403);
+    }
+  }
+  if (!hasFeatureAccess({ username: user.username, role: u.role, plan_scope: u.plan_scope }, feature)) {
+    return err(feature === "video"
+      ? "Gói hiện tại của bạn chưa mở tính năng video. Bạn chỉ cần nhắn admin một câu là bên mình sẽ hỗ trợ nâng cấp gói thật nhanh cho bạn."
+      : "Gói hiện tại của bạn chưa mở tính năng tạo ảnh. Bạn nhắn admin giúp mình để được hỗ trợ nâng cấp gói phù hợp nhé.", 403);
+  }
+  const cookiePool = await getUserCookiePool(env, user.user_id, u.cookie_quota);
+  if (!cookiePool.length) return err("Chưa có cookie nào. Vui lòng thêm cookie trước.");
+  return json({
+    cookie: cookiePool[0],
+    cookie_pool: cookiePool,
+    vps_base: VPS,
+    feature,
+  });
 }
 
 async function addUserCookie(request, env) {
