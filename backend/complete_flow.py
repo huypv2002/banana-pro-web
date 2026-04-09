@@ -4192,9 +4192,27 @@ class LabsFlowClient:
                     print(f"  ✅ [Chrome CDP] Token injected (len={len(token)}, ts={token_generated_at:.0f})")
                     return True
                 else:
-                    print(f"  ⚠️ [Chrome CDP] Không lấy được token, fallback Playwright...")
+                    print(f"  ⚠️ [Chrome CDP] Không lấy được token, thử reset tab/profile rồi retry 1 lần...")
             except Exception as e:
-                print(f"  ⚠️ [Chrome CDP] Error: {e}, fallback Playwright...")
+                print(f"  ⚠️ [Chrome CDP] Error: {e}, thử reset tab/profile rồi retry 1 lần...")
+
+            try:
+                LabsFlowClient._zendriver_reset_page(cookie_hash)
+                time.sleep(1.0)
+                token = self._get_recaptcha_token_zendriver(
+                    timeout_s=75,
+                    recaptcha_action=recaptcha_action,
+                )
+                if token and len(token.strip()) > 0:
+                    token_generated_at = time.time()
+                    self._record_token_source("chrome_cdp")
+                    client_context["recaptchaToken"] = token
+                    LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
+                    print(f"  ✅ [Chrome CDP] Token injected sau retry (len={len(token)}, ts={token_generated_at:.0f})")
+                    return True
+                print(f"  ⚠️ [Chrome CDP] Retry vẫn không lấy được token, fallback Playwright...")
+            except Exception as retry_err:
+                print(f"  ⚠️ [Chrome CDP] Retry error: {retry_err}, fallback Playwright...")
         
         # ✅ SOURCE 2: Playwright (fallback)
         print(f"  🟡 [Token] Dùng Playwright...")
