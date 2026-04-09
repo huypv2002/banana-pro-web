@@ -413,6 +413,7 @@ class LabsFlowClient:
     _recaptcha_results: Dict[str, Dict[str, Any]] = {}  # {request_id: {"token": str, "error": str}}
     _recaptcha_results_lock = threading.Lock()
     _recaptcha_worker_started = False
+    _recaptcha_worker_ready_event = threading.Event()
     _recaptcha_worker_browser: Optional[Any] = None  # Browser instance của worker thread (sync Playwright)
     # Mỗi cookie có tối đa 3 tab (Page) trong 1 BrowserContext
     _recaptcha_worker_pages: Dict[str, List[Any]] = {}  # {cookie_hash: [Page, ...]}
@@ -2445,6 +2446,7 @@ class LabsFlowClient:
                 return
             
             cls._recaptcha_worker_started = True
+            cls._recaptcha_worker_ready_event.clear()
             
             def worker_loop():
                 """Worker thread loop: xử lý reCAPTCHA requests từ queue."""
@@ -2524,6 +2526,7 @@ class LabsFlowClient:
                     
                     cls._recaptcha_worker_browser = browser
                     cls._recaptcha_playwright = playwright
+                    cls._recaptcha_worker_ready_event.set()
                     
                 except Exception as e:
                     print(f"  ✗ Lỗi khởi tạo Browser: {e}")
@@ -2531,6 +2534,7 @@ class LabsFlowClient:
                     traceback.print_exc()
                     cls._recaptcha_worker_browser = None
                     cls._recaptcha_worker_started = False
+                    cls._recaptcha_worker_ready_event.set()
                     return
                 
                 # Worker loop: xử lý requests từ queue
@@ -2616,6 +2620,9 @@ class LabsFlowClient:
                         cls._recaptcha_playwright.stop()
                 except Exception:
                     pass
+                cls._recaptcha_worker_browser = None
+                cls._recaptcha_worker_started = False
+                cls._recaptcha_worker_ready_event.clear()
                 print("  ✅ Worker thread đã dừng")
             
             # Start worker thread
@@ -2970,16 +2977,17 @@ class LabsFlowClient:
             # Đảm bảo worker đã khởi động
             LabsFlowClient._ensure_recaptcha_worker()
             
-            # Đợi browser của worker sẵn sàng (tránh race: worker thread chưa kịp launch browser)
-            wait_start = time.time()
-            while LabsFlowClient._recaptcha_worker_browser is None and LabsFlowClient._recaptcha_worker_started:
-                if time.time() - wait_start > 15:  # tối đa 15s để khởi tạo browser
-                    break
-                time.sleep(0.1)
-            
+            # Đợi worker browser sẵn sàng thật sự để tránh race:
+            # thread đã start nhưng Playwright/Chrome vẫn đang khởi tạo nền.
+            LabsFlowClient._recaptcha_worker_ready_event.wait(timeout=20)
+
             if not LabsFlowClient._recaptcha_worker_browser:
-                self.last_error_detail = "reCAPTCHA worker browser chưa khởi tạo"
-                print("  ✗ [reCAPTCHA Client] Worker browser chưa khởi tạo (sau khi chờ)")
+                if LabsFlowClient._recaptcha_worker_started:
+                    self.last_error_detail = "reCAPTCHA worker đang khởi tạo browser nhưng chưa sẵn sàng"
+                    print("  ✗ [reCAPTCHA Client] Worker browser vẫn đang khởi tạo, chưa sẵn sàng")
+                else:
+                    self.last_error_detail = "reCAPTCHA worker browser chưa khởi tạo"
+                    print("  ✗ [reCAPTCHA Client] Worker browser chưa khởi tạo")
                 return None
 
             # Tạo request ID và event để đợi kết quả
