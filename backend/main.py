@@ -32,11 +32,119 @@ jobs: dict = {}
 upscaled_store: dict = {}  # {key: (base64_string, timestamp)}
 
 
-def _start_background_job(fn, *args):
-    """Chạy mỗi job trong thread riêng để không bị nghẽn bởi executor nhỏ toàn cục."""
-    t = threading.Thread(target=fn, args=args, daemon=True)
-    t.start()
-    return t
+# --- PROXY XOAY ---
+PROXYXOAY_KEY = os.environ.get("PROXYXOAY_KEY", "IEKItyTnONrBeyTPnNFgAt")
+_current_proxy = None
+_proxy_expire_time = 0
+_proxy_lock = threading.Lock()
+
+def get_shared_proxyxoay():
+    global _current_proxy, _proxy_expire_time
+    if not PROXYXOAY_KEY: return None
+    with _proxy_lock:
+        if time.time() < _proxy_expire_time and _current_proxy:
+            return _current_proxy
+        try:
+            import requests as _req, re
+            url = f"https://proxyxoay.shop/api/get.php?key={PROXYXOAY_KEY}&nhamang=random&tinhthanh=0&whitelist="
+            res = _req.get(url, timeout=10)
+            data = res.json()
+            if data.get("status") == 100:
+                px = data.get("proxyhttp")
+                msg = data.get("message", "")
+                m = re.search(r'die sau (\d+)s', msg)
+                expire_in = int(m.group(1)) if m else 600
+                _proxy_expire_time = time.time() + expire_in - 30 # an toàn trừ hao 30s
+                
+                parts = px.split(":")
+                proxy_config = {}
+                if len(parts) >= 2:
+                    proxy_config["server"] = f"http://{parts[0]}:{parts[1]}"
+                if len(parts) >= 4 and parts[2]:
+                    proxy_config["username"] = parts[2]
+                    proxy_config["password"] = parts[3]
+                _current_proxy = proxy_config
+                logger.info(f"Vừa đổi Proxy thành công: {proxy_config['server']}")
+                return _current_proxy
+            else:
+                logger.warning(f"Lỗi Proxyxoay: {data}")
+        except Exception as e:
+            logger.error(f"Lỗi lấy proxy: {e}")
+    return _current_proxy
+
+# --- FAIR QUEUE CẤP ĐỘ 1 ---
+class FairJobQueue:
+    def __init__(self, num_workers=5):
+        self.jobs = {}
+        self.pending_by_user = {}
+        self.user_queue = []
+        self.lock = threading.Lock()
+        self.cv = threading.Condition(self.lock)
+        
+        # Bắt đầu các công nhân (worker)
+        for i in range(num_workers):
+            threading.Thread(target=self._worker_loop, daemon=True).start()
+
+    def put(self, job_id, user_id, fn, *args):
+        with self.lock:
+            self.jobs[job_id] = {
+                "user_id": user_id,
+                "fn": fn,
+                "args": args,
+                "status": "queued"
+            }
+            if user_id not in self.pending_by_user:
+                self.pending_by_user[user_id] = []
+                self.user_queue.append(user_id)
+            self.pending_by_user[user_id].append(job_id)
+            self.cv.notify()
+
+    def _worker_loop(self):
+        while True:
+            with self.lock:
+                while not self.user_queue:
+                    self.cv.wait()
+                
+                # Round-robin: lấy user đầu tiên
+                user_id = self.user_queue.pop(0)
+                job_id = self.pending_by_user[user_id].pop(0)
+                
+                # Quăng user xuống cuối hàng nếu còn job
+                if self.pending_by_user[user_id]:
+                    self.user_queue.append(user_id)
+                else:
+                    del self.pending_by_user[user_id]
+                
+                self.jobs[job_id]["status"] = "running"
+                fn = self.jobs[job_id]["fn"]
+                args = self.jobs[job_id]["args"]
+            
+            try:
+                fn(*args)
+            except Exception as e:
+                logger.error(f"Queue worker error: {e}")
+            finally:
+                with self.lock:
+                    self.jobs[job_id]["status"] = "done"
+
+    def get_position(self, job_id):
+        with self.lock:
+            if job_id not in self.jobs or self.jobs[job_id]["status"] != "queued":
+                return 0
+            user_id = self.jobs[job_id]["user_id"]
+            if user_id not in self.pending_by_user:
+                return 0
+            try:
+                # Tính xấp xỉ số order hiện tại
+                idx = self.pending_by_user[user_id].index(job_id)
+                user_pos = self.user_queue.index(user_id)
+                num_users = len(self.user_queue)
+                return idx * num_users + user_pos + 1
+            except ValueError:
+                return 0
+
+# Khởi tạo Queue có sẵn 5 Slot xử lý song song
+fast_queue = FairJobQueue(num_workers=5)
 
 def _cleanup_upscaled():
     """Remove entries older than 10 minutes."""
@@ -66,7 +174,7 @@ def get_active_profile() -> str:
     profiles = get_all_profiles()
     return profiles[0] if profiles else None
 
-def get_client_with_fallback(cookies_dict: dict):
+def get_client_with_fallback(cookies_dict: dict, proxy_config=None):
     """Tạo LabsFlowClient, thử từng profile cho đến khi fetch_access_token thành công."""
     profiles = get_all_profiles()
     if not profiles:
@@ -74,7 +182,7 @@ def get_client_with_fallback(cookies_dict: dict):
     last_err = ""
     for profile in profiles:
         try:
-            client = LabsFlowClient(cookies_dict, profile_path=profile)
+            client = LabsFlowClient(cookies_dict, profile_path=profile, proxy_config=proxy_config)
             if client.fetch_access_token():
                 logger.info(f"[Profile] Using: {Path(profile).name if profile else 'default'}")
                 return client
@@ -85,14 +193,118 @@ def get_client_with_fallback(cookies_dict: dict):
             logger.warning(f"[Profile] {profile} error: {e}")
     raise ValueError(f"Tất cả profiles đều thất bại. Lỗi cuối: {last_err}")
 
-@app.on_event("startup")
-def startup_event():
-    """Không khởi động hàng loạt profile khi boot; chỉ mở khi có yêu cầu thật."""
+class RecaptchaWorker:
+    def __init__(self, profile_path):
+        import tempfile, shutil, subprocess
+        from chrome_cdp_cookie import ChromeCDPSession
+        self.profile_path = profile_path
+        self.temp_dir = tempfile.mkdtemp(prefix="recaptcha_pool_")
+        
+        # Copy profile safely
+        try:
+            subprocess.run(
+                ["robocopy", profile_path, self.temp_dir, "/E", "/B", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS"],
+                capture_output=True, timeout=30
+            )
+        except Exception:
+            try:
+                shutil.copytree(profile_path, self.temp_dir, dirs_exist_ok=True, ignore_dangling_symlinks=True)
+            except Exception:
+                pass
+                
+        # Remove lock files
+        for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+            for d in [self.temp_dir, os.path.join(self.temp_dir, "Default")]:
+                lp = os.path.join(d, lock_file)
+                if os.path.exists(lp):
+                    try: os.remove(lp)
+                    except: pass
+                    
+        self.session = ChromeCDPSession(self.temp_dir, headless=False, window_pos=(-3000, -3000))
+        self.session.launch()
+        
+        # Connect to a target and navigate
+        target_id = self.session._get_page_target()
+        if not target_id:
+            try:
+                import requests
+                resp = requests.get(f"http://127.0.0.1:{self.session.port}/json/new", timeout=5)
+                target_id = resp.json().get("id")
+            except Exception:
+                pass
+        
+        if target_id:
+            self.session._connect_to_page(target_id)
+            self.session.navigate("https://labs.google/fx/tools/flow", wait_seconds=5)
+            # Dismiss popups
+            self.session._dismiss_popups()
+        
+    def get_token(self, action="VIDEO_GENERATION"):
+        try:
+            exec_js = f"""
+            (async () => {{
+                try {{
+                    const siteKey = '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
+                    if (typeof grecaptcha !== 'undefined' && grecaptcha.enterprise && typeof grecaptcha.enterprise.execute === 'function') {{
+                        return await grecaptcha.enterprise.execute(siteKey, {{action: '{action}'}});
+                    }} else if (typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function') {{
+                        return await grecaptcha.execute(siteKey, {{action: '{action}'}});
+                    }}
+                }} catch (e) {{
+                    return 'ERROR:' + e.toString();
+                }}
+                return null;
+            }})()
+            """
+            result = self.session._send_cdp("Runtime.evaluate", {
+                "expression": exec_js,
+                "awaitPromise": True,
+                "returnByValue": True,
+            }, timeout=30)
+            
+            val = result.get("result", {}).get("result", {}).get("value")
+            if isinstance(val, str) and not val.startswith("ERROR:") and len(val) > 20:
+                logger.info(f"Pool lấy thành công token độ dài {len(val)} bằng profile {os.path.basename(self.profile_path)}")
+                return val
+                
+            # If not working, navigate to refresh the page
+            logger.warning(f"Không lấy được token, load lại labs.google cho profile {os.path.basename(self.profile_path)}")
+            self.session.navigate("https://labs.google/fx/tools/flow", wait_seconds=5)
+            self.session._dismiss_popups()
+        except Exception as e:
+            logger.error(f"Error getting token: {e}")
+            try:
+                self.session.navigate("https://labs.google/fx/tools/flow", wait_seconds=5)
+            except:
+                pass
+        return None
+
+pool_workers: List[RecaptchaWorker] = []
+pool_idx = 0
+pool_lock = threading.Lock()
+
+def init_recaptcha_pool():
     profiles = get_all_profiles()
     if not profiles:
         logger.info("Chrome CDP startup: chưa có profile nào sẵn sàng.")
         return
-    logger.info(f"Chrome CDP startup: phát hiện {len(profiles)} profile(s), sẽ khởi động theo nhu cầu.")
+        
+    logger.info(f"Chrome CDP startup: phát hiện {len(profiles)} profile(s), bắt đầu spawn tối đa 5 profiles cho reCAPTCHA pool...")
+    for profile in profiles[:5]: # Chỉ spawn 5 profile
+        try:
+            logger.info(f"Đang spawn profile {os.path.basename(profile)}...")
+            worker = RecaptchaWorker(profile)
+            with pool_lock:
+                pool_workers.append(worker)
+            logger.info(f"Spawn thành công profile {os.path.basename(profile)}.")
+        except Exception as e:
+            logger.error(f"Lỗi khởi tạo profile {profile}: {e}")
+
+@app.on_event("startup")
+def startup_event():
+    # Spawn pool on background thread so it doesn't block API startup
+    t = threading.Thread(target=init_recaptcha_pool, daemon=True)
+    t.start()
 
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
@@ -122,6 +334,7 @@ class JobStatus(BaseModel):
     completed: int
     images: List[dict]
     error: Optional[str] = None
+    queue_position: int = 0
 
 
 def _parse_cookie_input(raw: str) -> dict:
@@ -172,6 +385,19 @@ def _build_cookie_pool(primary_cookie: str, cookie_pool: list = None) -> List[di
     return parsed
 
 
+def _build_profile_assignments(cookie_dicts: List[dict], profiles: List[str]) -> List[Optional[str]]:
+    """Gán profile cố định cho từng cookie trong suốt job.
+
+    Tránh trường hợp cùng một cookie bị các worker khác nhau kéo qua nhiều profile,
+    khiến Chrome CDP phải restart liên tục và dễ gây chậm/524.
+    """
+    if not cookie_dicts:
+        return []
+    if not profiles:
+        return [None] * len(cookie_dicts)
+    return [profiles[idx % len(profiles)] for idx in range(len(cookie_dicts))]
+
+
 def _run_generation(job_id: str, cookie: str, prompts: List[str],
                     model: str, aspect_ratio: str, variants: int,
                     resolution: str = "1k",
@@ -180,20 +406,23 @@ def _run_generation(job_id: str, cookie: str, prompts: List[str],
     import threading, queue as _queue, random
     job = jobs[job_id]
     job["status"] = "running"
+    proxy_config = get_shared_proxyxoay()
     logger.info(f"[{job_id}] prompts={len(prompts)}, variants={variants}, parallel={variants}, resolution={resolution}")
     try:
         cookie_dicts = _build_cookie_pool(cookie, cookie_pool)
         if not cookie_dicts:
             raise ValueError("Cookie không hợp lệ.")
         all_profiles = get_all_profiles() or [None]
+        cookie_profiles = _build_profile_assignments(cookie_dicts, all_profiles)
 
         def make_client(worker_idx: int):
-            cookie_dict = cookie_dicts[worker_idx % len(cookie_dicts)]
-            profile = all_profiles[worker_idx % len(all_profiles)]
-            c = LabsFlowClient(cookie_dict, profile_path=profile)
+            cookie_idx = worker_idx % len(cookie_dicts)
+            cookie_dict = cookie_dicts[cookie_idx]
+            profile = cookie_profiles[cookie_idx]
+            c = LabsFlowClient(cookie_dict, profile_path=profile, proxy_config=proxy_config)
             if c.fetch_access_token():
                 return c
-            return get_client_with_fallback(cookie_dict)
+            return get_client_with_fallback(cookie_dict, proxy_config=proxy_config)
 
         client = make_client(0)
         project_id = client.flow_project_id
@@ -358,52 +587,28 @@ class RecaptchaRequest(BaseModel):
 
 @app.post("/recaptcha-token")
 def get_recaptcha_token(req: RecaptchaRequest):
-    """Lấy reCAPTCHA token từ Chrome thật trên VPS. Thử profile phù hợp và fallback khi cần."""
+    """Lấy reCAPTCHA token từ pool 5 Chrome profiles song song, không cần inject cookies."""
+    global pool_idx
     try:
-        cookies = _parse_cookie_input(req.cookie)
-        if not cookies:
-            return {"ok": False, "error": "Cookie không hợp lệ"}
-
-        # Lấy danh sách profiles có cookies
-        profiles = []
-        d = Path(PROFILES_DIR)
-        if d.is_dir():
-            for p in sorted(d.iterdir()):
-                if p.is_dir() and not p.name.startswith("."):
-                    c = p / "Default" / "Network" / "Cookies"
-                    if c.exists() and c.stat().st_size > 0:
-                        profiles.append(str(p))
-        if not profiles:
-            fallback = os.environ.get("CHROME_PROFILE_PATH")
-            if fallback:
-                profiles = [fallback]
-
-        last_err = ""
-        for profile in profiles:
-            try:
-                logger.info(f"[recaptcha-token] Trying profile: {profile}")
-                client = LabsFlowClient(cookies, profile_path=profile)
-                if not client.fetch_access_token():
-                    last_err = client.last_error_detail or "Không lấy được access token"
-                    continue
-                ctx = {}
-                got = client._maybe_inject_recaptcha(ctx, raise_on_fail=False, recaptcha_action=req.action)
-                if got:
-                    token = ctx.get("recaptchaToken")
-                    if not token:
-                        rc = ctx.get("recaptchaContext", {})
-                        token = rc.get("token")
-                    if token:
-                        logger.info(f"[recaptcha-token] OK from profile: {profile}")
-                        return {"ok": True, "token": token, "access_token": client.access_token}
-                last_err = client.last_error_detail or "Không lấy được token"
-                logger.warning(f"[recaptcha-token] Failed profile {profile}: {last_err}")
-            except Exception as e:
-                last_err = str(e)
-                logger.warning(f"[recaptcha-token] Error profile {profile}: {e}")
-                continue
-
-        return {"ok": False, "error": last_err or "Tất cả profiles đều thất bại"}
+        with pool_lock:
+            workers = list(pool_workers)
+            
+        if not workers:
+            # Fallback nếu pool chưa sẵn sàng: thử khởi động 1 con tại chỗ (mất thời gian)
+            return {"ok": False, "error": "Chưa có profile nào sẵn sàng trong reCAPTCHA pool. Vui lòng đợi khởi động xong."}
+            
+        # Round-robin lấy worker từ pool
+        for _ in range(len(workers)):
+            with pool_lock:
+                current_worker = workers[pool_idx % len(workers)]
+                pool_idx += 1
+                
+            token = current_worker.get_token(action=req.action)
+            if token:
+                # Trả về token nhanh chóng
+                return {"ok": True, "token": token, "access_token": ""}
+                
+        return {"ok": False, "error": "Tất cả profile trong pool đều lấy token thất bại"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -466,13 +671,18 @@ async def generate(req: GenerateRequest):
     jobs[job_id] = {"status": "pending", "total": len(req.prompts) * req.variants,
                     "completed": 0, "images": [], "error": None, "cancelled": False}
 
-    _start_background_job(
+    # Extract session token for user identification
+    cookie_dict = _parse_cookie_input(req.cookie)
+    user_id = cookie_dict.get("__Secure-next-auth.session-token", "anonymous")
+
+    fast_queue.put(
+        job_id, user_id,
         _run_generation,
         job_id, req.cookie, req.prompts, req.model, req.aspect_ratio, req.variants,
         req.resolution, req.reference_images or [], req.folder_images or {}, req.cookie_pool or []
     )
 
-    return JobStatus(job_id=job_id, **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
+    return JobStatus(job_id=job_id, queue_position=fast_queue.get_position(job_id), **{k: jobs[job_id][k] for k in ("status", "total", "completed", "images", "error")})
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatus)
@@ -480,7 +690,7 @@ def get_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job không tồn tại")
-    return JobStatus(job_id=job_id, **{k: job[k] for k in ("status", "total", "completed", "images", "error")})
+    return JobStatus(job_id=job_id, queue_position=fast_queue.get_position(job_id), **{k: job[k] for k in ("status", "total", "completed", "images", "error")})
 
 
 @app.delete("/jobs/{job_id}")
@@ -573,13 +783,17 @@ async def generate_video(req: VideoGenerateRequest):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts),
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
-    _start_background_job(
+    cookie_dict = _parse_cookie_input(req.cookie)
+    user_id = cookie_dict.get("__Secure-next-auth.session-token", "anonymous")
+
+    fast_queue.put(
+        job_id, user_id,
         _run_video_generation,
         job_id, req.cookie, req.prompts, req.mode, req.model,
         req.num_videos, req.ref_images or {}, req.end_images or {},
         req.delay, req.workers, req.cookie_pool or []
     )
-    return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
+    return {"job_id": job_id, "status": "pending", "queue_position": fast_queue.get_position(job_id), "total": len(req.prompts)}
 
 
 @app.post("/generate-video-from-image")
@@ -592,11 +806,15 @@ async def generate_video_from_image(req: VideoFromImageRequest):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "total": len(req.prompts),
                     "completed": 0, "videos": [], "error": None, "cancelled": False}
-    _start_background_job(
+    cookie_dict = _parse_cookie_input(req.cookie)
+    user_id = cookie_dict.get("__Secure-next-auth.session-token", "anonymous")
+
+    fast_queue.put(
+        job_id, user_id,
         _run_video_from_image,
         job_id, req.cookie, req.prompts, req.image, req.model, req.num_videos
     )
-    return {"job_id": job_id, "status": "pending", "total": len(req.prompts)}
+    return {"job_id": job_id, "status": "pending", "queue_position": fast_queue.get_position(job_id), "total": len(req.prompts)}
 
 @app.get("/video-jobs/{job_id}")
 def get_video_job(job_id: str):
@@ -604,6 +822,7 @@ def get_video_job(job_id: str):
     if not job:
         raise HTTPException(404, "Job không tồn tại")
     return {"job_id": job_id, "status": job["status"], "total": job["total"],
+            "queue_position": fast_queue.get_position(job_id),
             "completed": job["completed"], "videos": job.get("videos", []), "error": job.get("error")}
 
 
@@ -668,6 +887,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                           delay: int = 3, workers: int = 3, cookie_pool: list = None):
     job = jobs[job_id]
     job["status"] = "running"
+    proxy_config = get_shared_proxyxoay()
     ref_images = ref_images or {}
     end_images = end_images or {}
     # Business rule:
@@ -696,19 +916,21 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
 
         # Tạo sẵn clients cho từng profile (dùng cho parallel T2V)
         all_profiles = get_all_profiles() or [None]
+        cookie_profiles = _build_profile_assignments(cookie_dicts, all_profiles)
         # Client chính (profile đầu tiên thành công) — dùng cho sequential modes
-        main_client = get_client_with_fallback(cookie_dicts[0])
+        main_client = get_client_with_fallback(cookie_dicts[0], proxy_config=proxy_config)
         main_project_id = main_client.flow_project_id
         upload_cache = {}
 
         def make_client(worker_idx: int):
-            """Tạo client cho worker, dùng profile round-robin."""
-            profile = all_profiles[worker_idx % len(all_profiles)]
-            cookie_dict = cookie_dicts[worker_idx % len(cookie_dicts)]
-            c = LabsFlowClient(cookie_dict, profile_path=profile)
+            """Tạo client cho worker, nhưng mỗi cookie luôn bám 1 profile cố định."""
+            cookie_idx = worker_idx % len(cookie_dicts)
+            profile = cookie_profiles[cookie_idx]
+            cookie_dict = cookie_dicts[cookie_idx]
+            c = LabsFlowClient(cookie_dict, profile_path=profile, proxy_config=proxy_config)
             if c.fetch_access_token():
                 return c
-            return get_client_with_fallback(cookie_dict)
+            return get_client_with_fallback(cookie_dict, proxy_config=proxy_config)
 
         workers = max(1, workers * len(cookie_dicts))
 
