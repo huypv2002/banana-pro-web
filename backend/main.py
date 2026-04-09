@@ -9,8 +9,9 @@ import threading
 
 # ✅ Set env TRƯỚC khi import complete_flow (LabsFlowClient đọc env lúc __init__)
 os.environ["AUTO_RECAPTCHA"] = "1"
-os.environ["RECAPTCHA_MODE"] = "selenium"
+os.environ["RECAPTCHA_MODE"] = "chrome_cdp"
 os.environ["SELENIUM_HEADLESS"] = "0"
+os.environ["CHROME_CDP_ONLY"] = "1"
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware

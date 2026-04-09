@@ -695,26 +695,31 @@ class LabsFlowClient:
         )
         self.flow_project_id = _env("FLOW_PROJECT_ID", "b7974022-eba1-489c-8228-eb02442e2a6a")
 
-        # --- reCAPTCHA mode: Selenium Driver (mặc định) hoặc Extension ---
+        # --- reCAPTCHA mode: Chrome CDP only ---
         # Enable by setting env AUTO_RECAPTCHA=1 (recommended for GUI)
         auto_flag = _env("AUTO_RECAPTCHA", "0") or "0"
         self.auto_recaptcha: bool = str(auto_flag) in ("1", "true", "True", "YES", "yes")
+        self.chrome_cdp_only: bool = str(_env("CHROME_CDP_ONLY", "1") or "1") in ("1", "true", "True", "YES", "yes")
         
-        # ✅ Toggle giữa Selenium Driver và Extension
-        # RECAPTCHA_MODE có thể là: "selenium", "browser", "driver" (mặc định) hoặc "extension", "bridge"
-        recaptcha_mode = _env("RECAPTCHA_MODE", "selenium").lower()
+        recaptcha_mode = _env("RECAPTCHA_MODE", "chrome_cdp").lower()
         
-        # ✅ Mặc định dùng Selenium Driver (Trình duyệt)
-        if recaptcha_mode in ("selenium", "browser", "driver", "trinhduyet"):
+        if recaptcha_mode in ("chrome_cdp", "cdp", "chrome"):
+            self.use_selenium_recaptcha = False
+            self.use_extension_recaptcha = False
+            self.use_chrome_cdp_recaptcha = True
+        elif recaptcha_mode in ("selenium", "browser", "driver", "trinhduyet"):
             self.use_selenium_recaptcha = True
             self.use_extension_recaptcha = False
+            self.use_chrome_cdp_recaptcha = False
         elif recaptcha_mode in ("extension", "bridge", "ext"):
             self.use_selenium_recaptcha = False
             self.use_extension_recaptcha = True
+            self.use_chrome_cdp_recaptcha = False
         else:
-            # Fallback: mặc định Selenium
-            self.use_selenium_recaptcha = True
+            # Fallback: mặc định Chrome CDP
+            self.use_selenium_recaptcha = False
             self.use_extension_recaptcha = False
+            self.use_chrome_cdp_recaptcha = True
         
         # ✅ Extension mode settings (chỉ dùng khi use_extension_recaptcha = True)
         self.captcha_bridge_url: str = _env("CAPTCHA_BRIDGE_URL", "http://localhost:3000") or "http://localhost:3000"
@@ -725,7 +730,9 @@ class LabsFlowClient:
         
         # ✅ Log mode đang dùng
         if self.auto_recaptcha:
-            if self.use_selenium_recaptcha:
+            if self.use_chrome_cdp_recaptcha or self.chrome_cdp_only:
+                mode_str = "Chrome CDP off-screen"
+            elif self.use_selenium_recaptcha:
                 mode_str = "Selenium Driver (Trình duyệt)"
                 if self.selenium_headless:
                     mode_str += " [Headless]"
@@ -4155,9 +4162,8 @@ class LabsFlowClient:
     ) -> bool:
         """If enabled, fetch reCAPTCHA token and inject into clientContext.
         
-        ✅ TOKEN SOURCE PRIORITY:
-        1. Zendriver (headed, undetected) → trust score cao
-        2. Playwright (fallback) → sync API worker thread
+        ✅ TOKEN SOURCE:
+        1. Chrome CDP off-screen (duy nhất)
         
         Args:
             raise_on_fail: If True, raise exception when token not available
@@ -4175,7 +4181,7 @@ class LabsFlowClient:
         token = None
         token_generated_at = None
         
-        # ✅ SOURCE 1: Chrome CDP (ưu tiên - Chrome thật, trust score cao)
+        # ✅ SOURCE 1: Chrome CDP off-screen (duy nhất)
         if self._should_use_zendriver():
             print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, off-screen)...")
             try:
@@ -4210,56 +4216,15 @@ class LabsFlowClient:
                     LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
                     print(f"  ✅ [Chrome CDP] Token injected sau retry (len={len(token)}, ts={token_generated_at:.0f})")
                     return True
-                print(f"  ⚠️ [Chrome CDP] Retry vẫn không lấy được token, fallback Playwright...")
+                print(f"  ⚠️ [Chrome CDP] Retry vẫn không lấy được token.")
             except Exception as retry_err:
-                print(f"  ⚠️ [Chrome CDP] Retry error: {retry_err}, fallback Playwright...")
+                print(f"  ⚠️ [Chrome CDP] Retry error: {retry_err}")
         
-        # ✅ SOURCE 2: Playwright (fallback)
-        print(f"  🟡 [Token] Dùng Playwright...")
-        token = self._get_recaptcha_token_with_playwright(
-            timeout_s=90, 
-            max_retries_on_403=3, 
-            acquire_lock=acquire_lock,
-            recaptcha_action=recaptcha_action,
-        )
-        
-        if token and len(token.strip()) > 0:
-            token_generated_at = time.time()
-            self._record_token_source("playwright")
-            client_context["recaptchaToken"] = token
-            LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
-            print(f"  ✅ [Playwright] Token injected (len={len(token)}, ts={token_generated_at:.0f})")
-            return True
-        
-        # ✅ SOURCE 3: VPS API (remote fallback)
-        vps_url = _env("VPS_RECAPTCHA_URL")
-        if vps_url:
-            print(f"  🔴 [Token] Fallback VPS API: {vps_url}...")
-            try:
-                cookie_str = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
-                resp = self.session.post(vps_url, json={"cookie": cookie_str, "action": recaptcha_action}, timeout=120)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("ok") and data.get("token"):
-                        token = data["token"]
-                        token_generated_at = time.time()
-                        self._record_token_source("vps_api")
-                        client_context["recaptchaToken"] = token
-                        LabsFlowClient._token_timestamps[cookie_hash] = token_generated_at
-                        print(f"  ✅ [VPS API] Token injected (len={len(token)}, ts={token_generated_at:.0f})")
-                        return True
-                    else:
-                        print(f"  ⚠️ [VPS API] Failed: {data.get('error', 'unknown')}")
-                else:
-                    print(f"  ⚠️ [VPS API] HTTP {resp.status_code}")
-            except Exception as e:
-                print(f"  ⚠️ [VPS API] Error: {e}")
-        
-        # Tất cả source đều fail
+        # Chrome CDP fail
         if raise_on_fail:
-            error_msg = f"Cannot get reCAPTCHA token from all sources (CDP, Playwright, VPS). {self.last_error_detail or ''}"
+            error_msg = f"Không thể lấy reCAPTCHA token bằng Chrome CDP off-screen. {self.last_error_detail or ''}"
             self.last_error_detail = error_msg
-            print(f"  ✗ Không thể lấy token từ tất cả source, raise exception...")
+            print(f"  ✗ Chrome CDP không lấy được token, raise exception...")
             raise RuntimeError(error_msg)
         
         return False
