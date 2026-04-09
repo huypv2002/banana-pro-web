@@ -1112,6 +1112,42 @@ async function adminAddUser() {
   loadAdminUsers();
 }
 
+async function adminBulkCreateDemoUsers() {
+  if (authUser?.role !== "super_admin") {
+    sAlert("Chỉ super admin mới dùng được chức năng này.", "error");
+    return;
+  }
+  const count = parseInt(document.getElementById("adminDemoCount")?.value || "20") || 20;
+  const prefix = (document.getElementById("adminDemoPrefix")?.value || "demo").trim() || "demo";
+  const finalCount = Math.max(1, Math.min(200, count));
+  if (!await sConfirm(`Tạo ${finalCount} tài khoản demo mới?`, "Xác nhận tạo demo")) return;
+  const res = await apiFetch("/admin/users/bulk-demo", {
+    method: "POST",
+    body: JSON.stringify({ count: finalCount, prefix }),
+  });
+  if (!res.ok) {
+    sAlert(await parseApiError(res, "Không thể tạo tài khoản demo."), "error");
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  const lines = (data.users || []).map((user, idx) =>
+    `${idx + 1}. ${user.username} | ${user.password} | ${user.cookie_quota} cookie | ${user.plan_days} ngày`
+  );
+  const output = lines.join("\n");
+  try { await navigator.clipboard.writeText(output); } catch (_) {}
+  await Swal.fire({
+    title: `Đã tạo ${data.count || lines.length} tài khoản demo`,
+    html: `<div style="text-align:left">
+      <p style="font-size:0.84rem;line-height:1.6;color:#475569;margin-bottom:10px">Danh sách đã được copy sẵn vào clipboard. Mặc định mỗi tài khoản có <b>1 cookie</b> và <b>7 ngày</b>.</p>
+      <textarea readonly style="width:100%;min-height:320px;border:1px solid #dbe2ea;border-radius:12px;padding:12px;font:inherit;font-size:0.8rem;line-height:1.6">${output}</textarea>
+    </div>`,
+    width: "min(760px, 92vw)",
+    confirmButtonText: "Đã hiểu",
+    confirmButtonColor: "#16a34a",
+  });
+  loadAdminUsers();
+}
+
 async function adminChangeRole(id, role) {
   const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) });
   if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật vai trò người dùng."), "error"); return; }
@@ -1240,6 +1276,8 @@ function switchAdminSection(section) {
   document.getElementById("adminViewTitle").textContent = title;
   document.getElementById("adminViewSubtitle").textContent = subtitle;
   document.getElementById("adminViewChip").textContent = chip;
+  const bulkDemoBox = document.getElementById("adminBulkDemoBox");
+  if (bulkDemoBox) bulkDemoBox.style.display = section === "users" && authUser?.role === "super_admin" ? "" : "none";
   if (section === "overview" || section === "users" || section === "plans") loadAdminUsers();
   if (section === "overview") loadAdminHistory();
   if (section === "cookies") loadAdminCookieUsers();

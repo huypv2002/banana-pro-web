@@ -75,12 +75,30 @@ textarea { resize: vertical; }
 .btn-pause:hover:not(:disabled){ background: #ca8a04; }
 .btn-stop { background: #dc2626; color: #fff; font-size: 0.88rem; padding: 12px; border-radius: 12px; }
 .btn-stop:hover:not(:disabled) { background: #b91c1c; }
+.auto-download-card { padding: 12px 14px; }
+.toggle-row { display:flex; align-items:center; justify-content:space-between; gap:16px; cursor:pointer; }
+.toggle-title { font-size:0.84rem; font-weight:700; color:var(--text); }
+.toggle-note { margin-top:4px; font-size:0.75rem; color:var(--muted); line-height:1.5; max-width:280px; }
+.toggle-switch { position:relative; width:52px; height:30px; flex-shrink:0; }
+.toggle-switch input { position:absolute; inset:0; opacity:0; cursor:pointer; z-index:2; }
+.toggle-slider { position:absolute; inset:0; border-radius:999px; background:#dbe2ea; transition:background .2s ease, box-shadow .2s ease; box-shadow:inset 0 1px 2px rgba(15,23,42,.08); }
+.toggle-slider::after { content:""; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 2px 6px rgba(15,23,42,.16); transition:transform .2s ease; }
+.toggle-switch input:checked + .toggle-slider { background:#16a34a; }
+.toggle-switch input:checked + .toggle-slider::after { transform:translateX(22px); }
 
 /* Progress */
 .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.84rem; font-weight: 600; }
 .progress-bar-bg { background: #e2e8f0; border-radius: 99px; height: 8px; overflow: hidden; }
 .progress-bar-fill { height: 100%; background: linear-gradient(90deg,#16a34a,#22c55e); border-radius: 99px; transition: width .4s; width: 0%; }
 .progress-text { font-size: 0.77rem; color: var(--muted); margin-top: 4px; }
+.status-progress { min-width: 130px; display: inline-flex; flex-direction: column; gap: 6px; }
+.status-progress-label { color: #1d4ed8; font-weight: 700; font-size: 0.77rem; }
+.status-progress-track { position: relative; width: 100%; height: 6px; border-radius: 999px; overflow: hidden; background: #dbeafe; }
+.status-progress-bar { position: absolute; top: 0; left: -42%; width: 42%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #60a5fa, #2563eb, #60a5fa); animation: status-progress-slide 1.2s ease-in-out infinite; }
+@keyframes status-progress-slide {
+  0% { left: -42%; }
+  100% { left: 100%; }
+}
 
 /* Badge */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 0.71rem; font-weight: 700; }
@@ -241,6 +259,9 @@ textarea { resize: vertical; }
 .admin-history-grid { margin-top:0; }
 .admin-folder-list { display:flex; flex-direction:column; gap:8px; }
 .admin-filter-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.admin-bulk-demo { margin-top:14px; padding-top:14px; border-top:1px dashed #dbe2ea; display:grid; gap:10px; }
+.admin-bulk-demo-head h4 { font-size:.88rem; font-weight:800; color:#0f172a; margin-bottom:4px; }
+.admin-bulk-demo-head p { font-size:.77rem; line-height:1.55; color:#64748b; }
 
 /* ── Results Table ──────────────────────────────────────────────────────────── */
 .results-table-wrap { flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }

@@ -126,6 +126,18 @@
       <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()" disabled>Tạm dừng</button>
       <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
     </div>
+    <div class="card auto-download-card">
+      <label class="toggle-row" for="autoDownloadEachImageToggle">
+        <div>
+          <div class="toggle-title">Tự tải từng ảnh khi xong</div>
+          <div class="toggle-note">Ảnh nào hoàn thành trước sẽ tự tải về ngay, không cần đợi cả batch chạy xong.</div>
+        </div>
+        <span class="toggle-switch">
+          <input type="checkbox" id="autoDownloadEachImageToggle" onchange="toggleAutoDownloadEachImage(this.checked)"/>
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+    </div>
 
     <div class="card" id="progressCard" style="display:none">
       <div class="progress-header">
@@ -344,6 +356,17 @@
                   </select>
                   <input type="number" id="adminNewCookieQuota" min="1" max="50" value="5" placeholder="Giới hạn cookie"/>
                   <button class="btn btn-green admin-submit-btn" onclick="adminAddUser()">Tạo tài khoản</button>
+                </div>
+                <div class="admin-bulk-demo" id="adminBulkDemoBox" style="display:none">
+                  <div class="admin-bulk-demo-head">
+                    <h4>Tạo tài khoản demo hàng loạt</h4>
+                    <p>Mặc định mỗi tài khoản mới sẽ có 1 cookie và 7 ngày sử dụng.</p>
+                  </div>
+                  <div class="admin-form">
+                    <input type="number" id="adminDemoCount" min="1" max="200" value="20" placeholder="Số lượng"/>
+                    <input type="text" id="adminDemoPrefix" value="demo" placeholder="Tiền tố username"/>
+                    <button class="btn btn-blue admin-submit-btn" onclick="adminBulkCreateDemoUsers()">Tạo account demo</button>
+                  </div>
                 </div>
               </div>
             </aside>
