@@ -465,14 +465,21 @@ async function adminGetHistoryUsers(request, env, url) {
   const limit = parseInt(url.searchParams.get("limit") || "100");
   const offset = parseInt(url.searchParams.get("offset") || "0");
   const query = mediaType
-    ? `SELECT u.id as user_id, u.username, COUNT(*) as count, MAX(h.created_at) as created_at
+    ? `SELECT u.id as user_id, u.username, u.created_at as account_created_at, COUNT(*) as count, MAX(h.created_at) as created_at
        FROM gen_history h JOIN users u ON h.user_id=u.id
        WHERE COALESCE(h.media_type,'image')=? AND COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!=''
-       GROUP BY u.id, u.username ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`
-    : `SELECT u.id as user_id, u.username, COUNT(*) as count, MAX(h.created_at) as created_at
+       GROUP BY u.id, u.username, u.created_at ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`
+    : `SELECT
+         u.id as user_id,
+         u.username,
+         u.created_at as account_created_at,
+         SUM(CASE WHEN COALESCE(h.media_type,'image')='image' THEN 1 ELSE 0 END) as image_count,
+         SUM(CASE WHEN COALESCE(h.media_type,'image')='video' THEN 1 ELSE 0 END) as video_count,
+         COUNT(*) as count,
+         MAX(h.created_at) as created_at
        FROM gen_history h JOIN users u ON h.user_id=u.id
        WHERE COALESCE(h.media_url,h.image_url) IS NOT NULL AND COALESCE(h.media_url,h.image_url)!=''
-       GROUP BY u.id, u.username ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`;
+       GROUP BY u.id, u.username, u.created_at ORDER BY MAX(h.id) DESC LIMIT ? OFFSET ?`;
   const stmt = env.DB.prepare(query);
   const { results } = mediaType ? await stmt.bind(mediaType, limit, offset).all() : await stmt.bind(limit, offset).all();
   return json(results);

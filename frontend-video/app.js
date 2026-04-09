@@ -1671,7 +1671,7 @@ async function loadAdminHistoryUsers() {
   adminHistoryState = { userId: null, username: "", jobId: null, batchName: "", fileName: null };
   document.getElementById("adminHistoryBack").style.display = "none";
   document.getElementById("adminHistoryTitle").textContent = "Lịch sử toàn hệ thống";
-  document.getElementById("adminHistoryDesc").textContent = "Chọn một tài khoản bên trái để mở theo cây thư mục.";
+  document.getElementById("adminHistoryDesc").textContent = "Theo dõi từng tài khoản theo số ảnh, số video, ngày tạo và thời điểm hoạt động gần nhất.";
   const res = await apiFetch(`/admin/history/users${adminHistoryMedia ? `?media_type=${adminHistoryMedia}` : ""}`);
   if (!res.ok) return;
   const users = await res.json();
@@ -1679,7 +1679,11 @@ async function loadAdminHistoryUsers() {
     <div class="hist-folder" onclick="openAdminHistoryUser(${u.user_id},'${esc(u.username)}')">
       <div class="hist-folder-info">
         <div class="hist-folder-name">${esc(u.username)}</div>
-        <div class="hist-folder-meta">${u.count} mục</div>
+        <div class="hist-folder-meta">${u.count} mục${u.created_at ? ` · Hoạt động ${new Date(u.created_at + "Z").toLocaleString("vi-VN")}` : ""}</div>
+        <div class="hist-folder-badges">
+          ${adminHistoryMedia ? `<span class="hist-badge hist-badge-blue">${u.count} ${adminHistoryMedia === "video" ? "video" : "ảnh"}</span>` : `<span class="hist-badge hist-badge-blue">${u.image_count || 0} ảnh</span><span class="hist-badge hist-badge-green">${u.video_count || 0} video</span>`}
+          ${u.account_created_at ? `<span class="hist-badge">${`Tạo ${new Date(u.account_created_at + "Z").toLocaleDateString("vi-VN")}`}</span>` : ""}
+        </div>
       </div>
     </div>`).join("") || '<div class="empty-state"><div>Chưa có lịch sử</div></div>';
   document.getElementById("adminHistoryBrowser").innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><div>Chọn một tài khoản để xem lịch sử</div></div>';
