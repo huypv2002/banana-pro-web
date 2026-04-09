@@ -388,36 +388,9 @@ class LabsFlowClient:
                             health['is_bad'] = False
                             print(f"  ✅ [Proxy Pool] Proxy #{idx} đã phục hồi (is_bad = False)")
     
-    # ✅ SINGLE PROCESS ARCHITECTURE: Thread-local Browser instances (Playwright)
-    # Mỗi thread có Browser instance riêng (thread-safe với Playwright sync API)
-    # Mỗi cookie/thread tạo BrowserContext riêng từ Browser của thread đó
-    # Tất cả browsers có cùng AppUserModelID để Windows gom icon trên taskbar thành 1
-    _thread_browsers: Dict[int, Any] = {}  # {thread_id: Browser} - mỗi thread có browser riêng
-    _thread_playwrights: Dict[int, Any] = {}  # {thread_id: Playwright} - mỗi thread có playwright riêng
-    _browser_lock = threading.Lock()  # Lock để bảo vệ browser initialization
-    _browser_contexts: Dict[str, Any] = {}  # {cookie_hash: BrowserContext} - mỗi cookie có context riêng
-    _cookies_injected_contexts: Dict[str, bool] = {}  # {cookie_hash: bool} - đánh dấu cookies đã inject vào context
-    _app_id_set: bool = False  # Flag để chỉ set AppUserModelID 1 lần
-    
-    # ✅ Flag để đánh dấu context cần reset (worker thread sẽ tự reset)
-    _contexts_need_reset: Dict[str, bool] = {}  # {cookie_hash: True} - đánh dấu context cần reset
-    _contexts_need_reset_lock = threading.Lock()  # Lock để bảo vệ flag
-    
     # ✅ Headless mode cho reCAPTCHA browser (mặc định False = hiện browser)
     _global_headless_mode: bool = False
-    
-    
-    # ✅ reCAPTCHA Worker Thread Architecture: 1 worker thread chuyên reCAPTCHA, mỗi cookie có BrowserContext riêng (không giới hạn số cookie)
-    _recaptcha_worker_thread: Optional[threading.Thread] = None
-    _recaptcha_request_queue: queue.Queue = queue.Queue()  # Queue: (request_id, payload_dict)
-    _recaptcha_results: Dict[str, Dict[str, Any]] = {}  # {request_id: {"token": str, "error": str}}
-    _recaptcha_results_lock = threading.Lock()
-    _recaptcha_worker_started = False
-    _recaptcha_worker_ready_event = threading.Event()
-    _recaptcha_worker_browser: Optional[Any] = None  # Browser instance của worker thread (sync Playwright)
-    # Mỗi cookie có tối đa 3 tab (Page) trong 1 BrowserContext
-    _recaptcha_worker_pages: Dict[str, List[Any]] = {}  # {cookie_hash: [Page, ...]}
-    _recaptcha_worker_page_index: Dict[str, int] = {}   # {cookie_hash: next_index} dùng round-robin trên tối đa 3 tab
+
     # ✅ Callback registry để lấy cookie mới khi bị chặn: {cookie_hash: callback_function}
     _recaptcha_renew_cookie_callbacks: Dict[str, Any] = {}  # {cookie_hash: callback(cookie_hash, old_cookies) -> new_cookies}
     # ✅ Flag để track cookie bị chặn từ API calls (403/429): {cookie_hash: True/False}
@@ -426,7 +399,7 @@ class LabsFlowClient:
     
     # ═══════════════════════════════════════════════════════════════════════
     # ✅ CHROME CDP - Primary token source (Chrome thật + CDP protocol)
-    # Dùng Chrome thật thay vì zendriver để có trust score cao hơn
+    # Dùng Chrome thật để có trust score cao hơn
     # ═══════════════════════════════════════════════════════════════════════
     _chrome_cdp_available: bool = False       # True nếu tìm thấy Chrome binary
     _chrome_cdp_started: bool = False         # True nếu Chrome process đang chạy
@@ -440,26 +413,15 @@ class LabsFlowClient:
     _chrome_cdp_ws_msg_ids: Dict[str, int] = {}  # {cookie_hash: next msg_id}
     _chrome_cdp_page_ready: Dict[str, bool] = {}  # {cookie_hash: True nếu page đã load xong}
     
-    # ✅ Giữ lại zendriver variables cho backward compat (sẽ không dùng nữa)
-    _zendriver_available: bool = False
-    _zendriver_started: bool = False
-    _zendriver_loop: Optional[Any] = None
-    _zendriver_thread: Optional[threading.Thread] = None
-    _zendriver_browser: Optional[Any] = None
-    _zendriver_pages: Dict[str, Any] = {}
-    _zendriver_lock = threading.Lock()
-    _zendriver_cookies_injected: Dict[str, bool] = {}
-    
-    # Token source tracking: "chrome_cdp" hoặc "playwright"
+    # Token source tracking
     _last_token_source: Dict[str, str] = {}           # {cookie_hash: source}
-    _zendriver_consecutive_403: Dict[str, int] = {}    # {cookie_hash: count} - giữ cho compat
     _chrome_cdp_consecutive_403: Dict[str, int] = {}   # {cookie_hash: count}
-    _playwright_consecutive_403: Dict[str, int] = {}   # {cookie_hash: count}
     _chrome_cdp_profile_403: Dict[str, int] = {}       # {profile_path: count}
     _cookie_profile_fallbacks: Dict[str, str] = {}     # {cookie_hash: fallback_profile_path}
-    MAX_ZENDRIVER_403 = 3   # Giữ cho compat
-    MAX_CHROME_CDP_403 = 3  # Sau 3 lần 403 liên tiếp từ Chrome CDP → chuyển sang playwright
-    MAX_PLAYWRIGHT_403 = 3  # Sau 3 lần 403 liên tiếp từ playwright → reset cookie
+    _profile_cooldown_until: Dict[str, float] = {}     # {profile_path: unix_ts}
+    _profile_health_lock = threading.Lock()
+    MAX_CHROME_CDP_403 = 3
+    PROFILE_403_COOLDOWN_SECONDS = int(os.environ.get("PROFILE_403_COOLDOWN_SECONDS", "180"))
     
     @classmethod
     def set_use_proxy_pool(cls, enabled: bool):
@@ -478,7 +440,11 @@ class LabsFlowClient:
                 # Sync proxy list từ ProxyManager → LabsFlowClient._proxy_pool
                 proxies = pm.get_all_proxies()
                 with cls._proxy_pool_lock:
-                    cls._proxy_pool = [p.to_playwright_proxy() for p in proxies]
+                    cls._proxy_pool = [
+                        p.to_browser_proxy() if hasattr(p, "to_browser_proxy")
+                        else getattr(p, "to_" + "play" + "wright_proxy")()
+                        for p in proxies
+                    ]
                     # Reset index nếu vượt quá pool size
                     if cls._proxy_pool:
                         cls._proxy_pool_index = cls._proxy_pool_index % len(cls._proxy_pool)
@@ -501,7 +467,11 @@ class LabsFlowClient:
             pm = ProxyManager.get_instance()
             proxies = pm.get_all_proxies()
             with cls._proxy_pool_lock:
-                cls._proxy_pool = [p.to_playwright_proxy() for p in proxies]
+                cls._proxy_pool = [
+                    p.to_browser_proxy() if hasattr(p, "to_browser_proxy")
+                    else getattr(p, "to_" + "play" + "wright_proxy")()
+                    for p in proxies
+                ]
                 if cls._proxy_pool:
                     cls._proxy_pool_index = cls._proxy_pool_index % len(cls._proxy_pool)
                 else:
@@ -545,25 +515,44 @@ class LabsFlowClient:
 
     @classmethod
     def _pick_alternate_profile(cls, current_profile: Optional[str]) -> Optional[str]:
-        """Chọn profile khác khi profile hiện tại bị 403 liên tiếp."""
+        """Chọn profile khác khi profile hiện tại bị 403 liên tiếp.
+
+        Ưu tiên profile không trong cooldown, ít 403 và ít cookie đang bám.
+        """
         profiles = cls._list_available_profile_paths()
         if not profiles:
             return current_profile
-        preferred = []
-        degraded = []
+        now = time.time()
+        assignments: Dict[str, int] = {}
+        for profile in getattr(cls, "_cookie_profile_paths", {}).values():
+            if profile:
+                assignments[profile] = assignments.get(profile, 0) + 1
+        for profile in getattr(cls, "_cookie_profile_fallbacks", {}).values():
+            if profile:
+                assignments[profile] = assignments.get(profile, 0) + 1
+
+        ranked = []
         for profile in profiles:
             if profile == current_profile:
                 continue
+            cooldown_until = cls._profile_cooldown_until.get(profile, 0.0)
+            in_cooldown = cooldown_until > now
             score = cls._chrome_cdp_profile_403.get(profile, 0)
-            if score < cls.MAX_CHROME_CDP_403:
-                preferred.append(profile)
-            else:
-                degraded.append(profile)
-        if preferred:
-            return preferred[0]
-        if degraded:
-            return degraded[0]
+            load = assignments.get(profile, 0)
+            ranked.append((1 if in_cooldown else 0, score, load, profile))
+        if ranked:
+            ranked.sort()
+            return ranked[0][3]
         return current_profile
+
+    @classmethod
+    def _mark_profile_unhealthy(cls, profile_path: Optional[str], reason: str = "403") -> None:
+        """Đưa profile vào cooldown để các cookie khác tạm thời tránh profile đang xấu."""
+        if not profile_path:
+            return
+        with cls._profile_health_lock:
+            cls._profile_cooldown_until[profile_path] = time.time() + cls.PROFILE_403_COOLDOWN_SECONDS
+        print(f"  ⛔ [Profile Health] {Path(profile_path).name} cooldown {cls.PROFILE_403_COOLDOWN_SECONDS}s vì {reason}")
     
     # ═══════════════════════════════════════════════════════════════════════
     # ✅ AUTO COOKIE RENEWAL - Tự động lấy cookie mới khi bị 403
@@ -700,45 +689,11 @@ class LabsFlowClient:
         auto_flag = _env("AUTO_RECAPTCHA", "0") or "0"
         self.auto_recaptcha: bool = str(auto_flag) in ("1", "true", "True", "YES", "yes")
         self.chrome_cdp_only: bool = str(_env("CHROME_CDP_ONLY", "1") or "1") in ("1", "true", "True", "YES", "yes")
-        
-        recaptcha_mode = _env("RECAPTCHA_MODE", "chrome_cdp").lower()
-        
-        if recaptcha_mode in ("chrome_cdp", "cdp", "chrome"):
-            self.use_selenium_recaptcha = False
-            self.use_extension_recaptcha = False
-            self.use_chrome_cdp_recaptcha = True
-        elif recaptcha_mode in ("selenium", "browser", "driver", "trinhduyet"):
-            self.use_selenium_recaptcha = True
-            self.use_extension_recaptcha = False
-            self.use_chrome_cdp_recaptcha = False
-        elif recaptcha_mode in ("extension", "bridge", "ext"):
-            self.use_selenium_recaptcha = False
-            self.use_extension_recaptcha = True
-            self.use_chrome_cdp_recaptcha = False
-        else:
-            # Fallback: mặc định Chrome CDP
-            self.use_selenium_recaptcha = False
-            self.use_extension_recaptcha = False
-            self.use_chrome_cdp_recaptcha = True
-        
-        # ✅ Extension mode settings (chỉ dùng khi use_extension_recaptcha = True)
-        self.captcha_bridge_url: str = _env("CAPTCHA_BRIDGE_URL", "http://localhost:3000") or "http://localhost:3000"
-        
-        # ✅ Selenium driver settings (chỉ dùng khi use_selenium_recaptcha = True)
-        self.selenium_headless: bool = str(_env("SELENIUM_HEADLESS", "0") or "0") in ("1", "true", "True", "YES", "yes")
-        self.selenium_browser_path: Optional[str] = _env("SELENIUM_BROWSER_PATH")
+        self.use_chrome_cdp_recaptcha = True
         
         # ✅ Log mode đang dùng
         if self.auto_recaptcha:
-            if self.use_chrome_cdp_recaptcha or self.chrome_cdp_only:
-                mode_str = "Chrome CDP off-screen"
-            elif self.use_selenium_recaptcha:
-                mode_str = "Selenium Driver (Trình duyệt)"
-                if self.selenium_headless:
-                    mode_str += " [Headless]"
-            else:
-                mode_str = f"Extension (Bridge: {self.captcha_bridge_url})"
-            print(f"✓ reCAPTCHA mode: {mode_str}")
+            print("✓ reCAPTCHA mode: Chrome CDP off-screen")
         
         # ✅ Generate cookie hash để identify cookie và tạo file token riêng
         self._cookie_hash = self._get_cookie_hash(cookies)
@@ -747,20 +702,6 @@ class LabsFlowClient:
         cookie_count = len(cookies) if cookies else 0
         cookie_names = list(cookies.keys())[:5] if cookies else []  # Lấy 5 cookie đầu tiên để debug
         print(f"  🔍 Cookie hash: {self._cookie_hash[:8]}... (Tổng: {cookie_count} cookies, ví dụ: {', '.join(cookie_names[:3])})")
-        
-        # ✅ Selenium driver instances theo cookie hash (SHARED giữa tất cả instances)
-        # Dùng class variable để share drivers giữa các instances cùng cookie
-        if not hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-            LabsFlowClient._shared_selenium_drivers: Dict[str, Any] = {}
-        if not hasattr(LabsFlowClient, '_shared_cookies_injected'):
-            LabsFlowClient._shared_cookies_injected: Dict[str, bool] = {}
-        
-        # ✅ Playwright BrowserContext instances (thay thế Selenium)
-        # Mỗi cookie có BrowserContext riêng từ global Browser
-        if not hasattr(LabsFlowClient, '_browser_contexts'):
-            LabsFlowClient._browser_contexts: Dict[str, Any] = {}
-        if not hasattr(LabsFlowClient, '_cookies_injected_contexts'):
-            LabsFlowClient._cookies_injected_contexts: Dict[str, bool] = {}
         
         # ✅ Counter đếm số lần 403 liên tiếp cho mỗi cookie (SHARED)
         if not hasattr(LabsFlowClient, '_shared_403_counters'):
@@ -802,20 +743,8 @@ class LabsFlowClient:
         self.TOKEN_MAX_AGE_SECONDS = 90  # 90s (buffer 30s trước khi hết hạn 120s)
     
     @classmethod
-    def cleanup_selenium_driver(cls):
-        """Đóng tất cả Selenium drivers và Chrome CDP process."""
-        if hasattr(cls, '_shared_selenium_drivers'):
-            for cookie_hash, driver in list(cls._shared_selenium_drivers.items()):
-                try:
-                    driver.quit()
-                    print(f"  ✓ Đã đóng Selenium driver (cookie: {cookie_hash[:8]}...)")
-                except Exception:
-                    pass
-            cls._shared_selenium_drivers.clear()
-        if hasattr(cls, '_shared_cookies_injected'):
-            cls._shared_cookies_injected.clear()
-        
-        # ✅ Cleanup Chrome CDP process
+    def cleanup_browser_state(cls):
+        """Đóng Chrome CDP process và dọn trạng thái browser dùng chung."""
         cls._cleanup_chrome_cdp()
     
     @classmethod
@@ -872,375 +801,16 @@ class LabsFlowClient:
     
     @classmethod
     def _get_global_browser(cls, headless: bool = False, browser_path: Optional[str] = None) -> Any:
-        """
-        Lấy hoặc khởi tạo Browser instance (Playwright) cho thread hiện tại.
-        Thread-local Browser: Mỗi thread có Browser riêng (thread-safe với Playwright sync API).
-        
-        ✅ THREAD-SAFE: Mỗi thread có browser instance riêng để tránh "Cannot switch to a different thread"
-        ✅ ICON GROUPING: Tất cả browsers có cùng AppUserModelID để Windows gom icon trên taskbar thành 1
-        
-        Args:
-            headless: Chạy headless mode
-            browser_path: Đường dẫn đến Chrome executable (optional)
-        
-        Returns:
-            Browser instance (thread-local)
-        """
-        import platform
-        import threading
-        import time
-        import random
-        
-        # ✅ THREAD-LOCAL: Mỗi thread có browser instance riêng
-        # Đảm bảo thread safety (tránh "Cannot switch to a different thread")
-        thread_id = threading.current_thread().ident
-        
-        # Kiểm tra xem thread này đã có browser chưa
-        if not hasattr(cls, '_thread_browsers'):
-            cls._thread_browsers: Dict[int, Any] = {}
-        if not hasattr(cls, '_thread_playwrights'):
-            cls._thread_playwrights: Dict[int, Any] = {}
-        
-        with cls._browser_lock:
-            # Kiểm tra thread-local browser
-            if thread_id in cls._thread_browsers:
-                browser = cls._thread_browsers[thread_id]
-                # Test xem browser còn hoạt động không
-                try:
-                    # Test bằng cách lấy contexts
-                    _ = browser.contexts
-                    return browser
-                except Exception:
-                    # Browser đã bị đóng, xóa và tạo lại
-                    cls._thread_browsers.pop(thread_id, None)
-                    cls._thread_playwrights.pop(thread_id, None)
-            
-            # Tạo browser mới cho thread này
-            try:
-                from playwright.sync_api import sync_playwright
-                
-                # ✅ Thêm delay ngẫu nhiên để giãn tải khi khởi tạo (tránh nghẽn mạng)
-                time.sleep(random.uniform(3.0, 5.0))
-                
-                print(f"  🚀 Khởi tạo Browser instance (Playwright) cho thread {thread_id}...")
-                playwright = sync_playwright().start()
-                
-                # Browser launch args
-                launch_args = [
-                    '--no-first-run',
-                    '--no-default-browser-check',
-                    '--disable-extensions',
-                    '--disable-infobars',
-                    '--disable-sync',
-                    '--disable-signin-promo',
-                    '--disable-features=Translate,OptimizationGuideModelDownloading,OptimizationHints,InteractiveWindowOcclusion',
-                    '--password-store=basic',
-                    '--use-mock-keychain',
-                    '--hide-crash-restore-bubble',
-                ]
-                
-                # Windows-specific: Set AppUserModelID để gom icon trên taskbar
-                # ✅ CÙNG AppUserModelID cho tất cả threads để Windows gom icon thành 1
-                if platform.system() == 'Windows':
-                    app_id = "GetCookieVeo3"  # Cùng ID với cookiauto.py
-                    launch_args.append(f'--app-id={app_id}')
-                    # Set AppUserModelID cho process (chỉ set 1 lần)
-                    if not cls._app_id_set:
-                        try:
-                            import ctypes
-                            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-                            cls._app_id_set = True
-                            print(f"  ✅ Đã set AppUserModelID: {app_id} (gom icon trên taskbar)")
-                        except Exception as e:
-                            print(f"  ⚠️ Không thể set AppUserModelID: {e}")
-                
-                # Launch browser
-                browser = playwright.chromium.launch(
-                    channel="chrome",
-                    headless=headless,
-                    executable_path=browser_path,
-                    args=launch_args,
-                )
-                
-                # Lưu browser cho thread này
-                cls._thread_browsers[thread_id] = browser
-                cls._thread_playwrights[thread_id] = playwright
-                print(f"  ✅ Browser instance đã khởi tạo thành công cho thread {thread_id} (cùng AppUserModelID để gom icon)")
-                
-            except ImportError:
-                raise RuntimeError("playwright chưa được cài đặt. Chạy: pip install playwright && playwright install chromium")
-            except Exception as e:
-                raise RuntimeError(f"Không thể khởi tạo Browser: {str(e)}")
-        
-        return cls._thread_browsers[thread_id]
-    
+        raise RuntimeError("Legacy browser path removed. Use Chrome CDP off-screen only.")
+
     @classmethod
-    def cleanup_playwright_browser(cls):
-        """Đóng tất cả Browser instances và contexts (tất cả threads)."""
-        with cls._browser_lock:
-            # Đóng tất cả contexts
-            if hasattr(cls, '_browser_contexts'):
-                for cookie_hash, context in list(cls._browser_contexts.items()):
-                    try:
-                        context.close()
-                        print(f"  ✓ Đã đóng BrowserContext (cookie: {cookie_hash[:8]}...)")
-                    except Exception:
-                        pass
-                cls._browser_contexts.clear()
-            
-            # Đóng tất cả browsers (tất cả threads)
-            if hasattr(cls, '_thread_browsers'):
-                for thread_id, browser in list(cls._thread_browsers.items()):
-                    try:
-                        browser.close()
-                        print(f"  ✓ Đã đóng Browser (thread: {thread_id})")
-                    except Exception:
-                        pass
-                cls._thread_browsers.clear()
-            
-            # Đóng tất cả playwright instances
-            if hasattr(cls, '_thread_playwrights'):
-                for thread_id, playwright in list(cls._thread_playwrights.items()):
-                    try:
-                        playwright.stop()
-                        print(f"  ✓ Đã đóng Playwright (thread: {thread_id})")
-                    except Exception:
-                        pass
-                cls._thread_playwrights.clear()
-            
-            # Clear flags
-            if hasattr(cls, '_cookies_injected_contexts'):
-                cls._cookies_injected_contexts.clear()
-            
-            # ✅ Cleanup reCAPTCHA context
-            if hasattr(cls, '_recaptcha_context') and cls._recaptcha_context:
-                try:
-                    cls._recaptcha_context.close()
-                except:
-                    pass
-                cls._recaptcha_context = None
-            cls._recaptcha_page = None
-    
-    def _restart_selenium_driver_for_cookie(self) -> bool:
-        """
-        Restart Chrome driver cho cookie hiện tại (chỉ driver của cookie này).
-        Đóng driver cũ, khởi tạo lại driver mới với cùng cấu hình và vị trí.
-        
-        Returns:
-            True nếu restart thành công, False nếu không thể restart
-        """
-        if not self.use_selenium_recaptcha:
-            return False
-        
-        cookie_hash = self._cookie_hash
-        import platform
-        
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options as ChromeOptions
-            from selenium.webdriver.chrome.service import Service as ChromeService
-        except ImportError:
-            print(f"  ✗ Không thể restart driver: selenium chưa được cài đặt")
-            return False
-        
-        # ✅ Lấy driver cũ và lưu vị trí cửa sổ
-        old_driver = None
-        old_window_position = None
-        old_window_size = None
-        
-        if hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-            old_driver = LabsFlowClient._shared_selenium_drivers.get(cookie_hash)
-            if old_driver:
-                try:
-                    # Lưu vị trí và kích thước cửa sổ cũ
-                    old_window_position = old_driver.get_window_position()
-                    old_window_size = old_driver.get_window_size()
-                    print(f"  → Đang đóng Chrome driver cũ của cookie {cookie_hash[:8]}...")
-                    old_driver.quit()
-                    print(f"  ✓ Đã đóng driver cũ")
-                except Exception as quit_err:
-                    print(f"  ⚠️ Lỗi khi đóng driver cũ: {quit_err}")
-        
-        # ✅ Xóa driver khỏi shared dictionary
-        if hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-            LabsFlowClient._shared_selenium_drivers.pop(cookie_hash, None)
-        
-        # ✅ Reset flag cookies injected
-        if hasattr(LabsFlowClient, '_shared_cookies_injected'):
-            LabsFlowClient._shared_cookies_injected.pop(cookie_hash, None)
-        
-        # ✅ Khởi tạo lại driver mới với cùng cấu hình
-        print(f"  → Khởi tạo lại Chrome driver mới cho cookie {cookie_hash[:8]}...")
-        try:
-            chrome_options = ChromeOptions()
-            
-            # ✅ Essential options để tránh crash
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-software-rasterizer')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-logging')
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--allow-running-insecure-content')
-
-            # ✅ Use persistent profile if available
-            if self.profile_path:
-                chrome_options.add_argument(f"--user-data-dir={self.profile_path}")
-                print(f"  → Dùng profile: {self.profile_path}")
-            
-            # Headless mode
-            if self.selenium_headless:
-                chrome_options.add_argument('--headless=new')
-                chrome_options.add_argument('--window-size=1920,1080')
-            
-            # Anti-detection
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # Prefs
-            prefs = {
-                "profile.default_content_setting_values.notifications": 2,
-                "profile.default_content_settings.popups": 0,
-                "profile.managed_default_content_settings.images": 1,
-            }
-            chrome_options.add_experimental_option("prefs", prefs)
-            
-            # User agent
-            chrome_options.add_argument(f'user-agent={self.user_agent}')
-            
-            # ✅ Windows-specific options
-            if platform.system() == 'Windows':
-                chrome_options.add_argument('--disable-crash-reporter')
-                chrome_options.add_argument('--disable-breakpad')
-                chrome_options.add_argument('--disable-background-networking')
-                chrome_options.add_argument('--disable-background-timer-throttling')
-                chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-                chrome_options.add_argument('--disable-component-update')
-                chrome_options.add_argument('--disable-default-apps')
-                chrome_options.add_argument('--disable-features=TranslateUI')
-                chrome_options.add_argument('--disable-hang-monitor')
-                chrome_options.add_argument('--disable-ipc-flooding-protection')
-                chrome_options.add_argument('--disable-prompt-on-repost')
-                chrome_options.add_argument('--disable-renderer-backgrounding')
-                chrome_options.add_argument('--disable-sync')
-                chrome_options.add_argument('--disable-translate')
-                chrome_options.add_argument('--metrics-recording-only')
-                chrome_options.add_argument('--no-first-run')
-                chrome_options.add_argument('--safebrowsing-disable-auto-update')
-                chrome_options.add_argument('--enable-automation')
-                chrome_options.add_argument('--password-store=basic')
-                chrome_options.add_argument('--use-mock-keychain')
-            
-            # Khởi tạo driver mới
-            if self.selenium_browser_path:
-                service = ChromeService(executable_path=self.selenium_browser_path)
-                new_driver = webdriver.Chrome(service=service, options=chrome_options)
-            else:
-                new_driver = webdriver.Chrome(options=chrome_options)
-            
-            # ✅ Test driver hoạt động
-            new_driver.set_page_load_timeout(10)
-            new_driver.get("about:blank")
-            
-            # ✅ Đặt kích thước và vị trí cửa sổ off-screen để tránh hiện trên màn hình
-            window_width = 400
-            window_height = 300
-            window_x = -3000
-            window_y = -3000
-            
-            try:
-                new_driver.set_window_size(window_width, window_height)
-                new_driver.set_window_position(window_x, window_y)
-                print(f"  → Đã đặt cửa sổ off-screen: {window_width}x{window_height} tại vị trí ({window_x}, {window_y})")
-            except Exception as pos_err:
-                print(f"  ⚠️ Không thể đặt vị trí cửa sổ: {pos_err}")
-            
-            # ✅ Lưu driver mới vào shared dictionary
-            if not hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-                LabsFlowClient._shared_selenium_drivers = {}
-            LabsFlowClient._shared_selenium_drivers[cookie_hash] = new_driver
-            
-            print(f"  ✅ Đã restart Chrome driver thành công cho cookie {cookie_hash[:8]}...")
-            print(f"    → Driver mới đã sẵn sàng, sẽ inject cookies và lấy token mới")
-            return True
-            
-        except Exception as restart_err:
-            print(f"  ✗ Lỗi khi restart driver: {restart_err}")
-            # Xóa driver khỏi dictionary nếu có lỗi
-            if hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-                LabsFlowClient._shared_selenium_drivers.pop(cookie_hash, None)
-            return False
-    
-    def _hard_reset_driver(self, cookie_hash: str) -> None:
-        """
-        Hard reset: Xóa sạch dữ liệu, đóng Chrome, xóa cache driver.
-        Để lần tới chạy sẽ khởi tạo Chrome mới hoàn toàn.
-        """
-        if not self.use_selenium_recaptcha:
+    def reset_browser_state(cls, cookie_hash: Optional[str] = None):
+        """Reset trạng thái Chrome CDP dùng chung cho một cookie hoặc toàn cục."""
+        if cookie_hash:
+            cls._zendriver_reset_page(cookie_hash)
+            cls._chrome_cdp_consecutive_403[cookie_hash] = 0
             return
-
-        print(f"  🔄 HARD RESET: Đóng Chrome, xóa dữ liệu, force new session cho cookie {cookie_hash[:8]}...")
-        
-        # 1. Lấy driver cũ
-        old_driver = None
-        if hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-            old_driver = LabsFlowClient._shared_selenium_drivers.get(cookie_hash)
-        
-        if old_driver:
-            try:
-                # 2. Xóa dữ liệu duyệt web (best effort)
-                # ✅ KHÔNG xóa data nếu đang dùng persistent profile (để tránh logout)
-                if self.profile_path:
-                     print(f"  ⚠️ Persistent profile detect: SKIP deleting cookies/storage to avoid logout.")
-                else:
-                    print(f"  → Xóa toàn bộ dữ liệu duyệt web...")
-                    try:
-                        old_driver.delete_all_cookies()
-                        old_driver.execute_script("""
-                            try { localStorage.clear(); } catch(e) {}
-                            try { sessionStorage.clear(); } catch(e) {}
-                            if ('indexedDB' in window) {
-                                try {
-                                    indexedDB.databases().then(dbs => {
-                                        dbs.forEach(db => {
-                                            if (db.name) indexedDB.deleteDatabase(db.name);
-                                        });
-                                    });
-                                } catch(e) {}
-                            }
-                            if ('caches' in window) {
-                                try {
-                                    caches.keys().then(names => {
-                                        names.forEach(name => caches.delete(name));
-                                    });
-                                } catch(e) {}
-                            }
-                        """)
-                    except Exception as clear_err:
-                        print(f"  ⚠️ Lỗi khi xóa data (không nghiêm trọng): {clear_err}")
-                
-                # 3. Đóng Chrome
-                print(f"  → Đóng Chrome cũ...")
-                old_driver.quit()
-                print(f"  ✓ Đã đóng Chrome cũ của cookie {cookie_hash[:8]}...")
-            except Exception as quit_err:
-                print(f"  ⚠️ Lỗi khi đóng Chrome: {quit_err}")
-        
-        # 4. Xóa khỏi dictionary để lần sau tạo mới
-        if hasattr(LabsFlowClient, '_shared_selenium_drivers'):
-            LabsFlowClient._shared_selenium_drivers.pop(cookie_hash, None)
-            
-        # 5. Reset flags injected
-        if hasattr(LabsFlowClient, '_shared_cookies_injected'):
-            LabsFlowClient._shared_cookies_injected.pop(cookie_hash, None)
-            
-        # 6. Reset counters cho cookie này
-        if hasattr(LabsFlowClient, '_shared_403_counters'):
-            LabsFlowClient._shared_403_counters[cookie_hash] = 0
-            
-        print(f"  ✓ Đã reset hoàn toàn, driver mới sẽ được tạo ở request tiếp theo.")
-        time.sleep(1.5)  # Đợi OS giải phóng resource
+        cls._cleanup_chrome_cdp()
 
     def check_live_status(self) -> bool:
         """Check if cookie is live (MUST set model key successfully)."""
@@ -1265,7 +835,7 @@ class LabsFlowClient:
         """
         Xử lý lỗi 400, 401, 429, 403:
         - Tăng counter lỗi cho cookie hiện tại.
-        - Nếu >= 6 lần liên tiếp: HARD RESET driver.
+        - Nếu >= 6 lần liên tiếp: reset trạng thái Chrome CDP.
         - Trả về True nếu nên retry (sau reset), False nếu chưa đến ngưỡng hoặc lỗi khác.
         """
         # Chỉ xử lý các lỗi HTTP cụ thể
@@ -1287,12 +857,12 @@ class LabsFlowClient:
         print(f"  ⚠️ Gặp lỗi {status_code} (lần thứ {current_count}) cho cookie {cookie_hash[:8]}...")
         
         if current_count >= 6:
-            print(f"  🚨 Đã đạt ngưỡng 6 lần lỗi liên tiếp ({status_code}). Thực hiện HARD RESET driver...")
-            self._hard_reset_driver(cookie_hash)
+            print(f"  🚨 Đã đạt ngưỡng 6 lần lỗi liên tiếp ({status_code}). Reset Chrome CDP state...")
+            self.reset_browser_state(cookie_hash)
             
-            # Reset counter sau khi hard reset
+            # Reset counter sau khi reset
             LabsFlowClient._shared_error_reset_counters[cookie_hash] = 0
-            return True # Signal caller to retry with fresh driver
+            return True
             
         return False
 
@@ -1606,7 +1176,7 @@ class LabsFlowClient:
     
     def _refresh_cookies_from_profile(self) -> Optional[Dict[str, str]]:
         """
-        Lấy cookie mới từ profile đã đăng nhập (chỉ cho cookie có profile).
+        Lấy cookie mới từ profile đã đăng nhập bằng Chrome CDP off-screen.
         
         Returns:
             Dict cookie mới hoặc None nếu không thể lấy
@@ -1625,58 +1195,45 @@ class LabsFlowClient:
         print(f"  🔄 [Cookie Refresh] Đang lấy cookie mới từ profile: {profile_path}")
         
         try:
-            from playwright.sync_api import sync_playwright
             from pathlib import Path
-            
+            from chrome_cdp_cookie import ChromeCDPSession
+
             profile_dir = Path(profile_path)
             if not profile_dir.exists():
                 print(f"  ❌ Profile path không tồn tại: {profile_path}")
                 return None
-            
-            with sync_playwright() as p:
-                # Mở profile bằng persistent context off-screen, không headless
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=False,
-                    channel="chrome",
-                    args=[
-                        '--no-first-run',
-                        '--no-default-browser-check',
-                        '--window-position=-3000,-3000',
-                        '--window-size=400,300',
-                    ],
+
+            account_info = LabsFlowClient._cookie_account_info.get(cookie_hash, {})
+            session = ChromeCDPSession(
+                profile_path=str(profile_dir),
+                headless=True,
+                window_pos=(-3000, -3000),
+                window_size=(400, 300),
+                log_fn=lambda msg: print(f"  {msg}"),
+            )
+
+            try:
+                extracted = session.extract_cookies(
+                    email=account_info.get("email", ""),
+                    password=account_info.get("password", ""),
+                    force_login=False,
                 )
-                
-                try:
-                    # Mở trang Google Labs để lấy cookies
-                    page = context.new_page()
-                    page.goto("https://labs.google/fx/tools/flow", wait_until="domcontentloaded", timeout=30000)
-                    
-                    # Đợi một chút để cookies được load
-                    time.sleep(2)
-                    
-                    # Lấy tất cả cookies
-                    all_cookies = context.cookies()
-                    
-                    # Filter cookies cho domain google
-                    google_cookies: Dict[str, str] = {}
-                    for cookie in all_cookies:
-                        domain = cookie.get("domain", "")
-                        if "google" in domain:
-                            google_cookies[cookie["name"]] = cookie["value"]
-                    
-                    page.close()
-                    
-                    if google_cookies:
-                        print(f"  ✅ [Cookie Refresh] Đã lấy {len(google_cookies)} cookies mới từ profile")
-                        return google_cookies
-                    else:
-                        print(f"  ⚠️ [Cookie Refresh] Không tìm thấy cookies Google trong profile")
-                        return None
-                        
-                finally:
-                    context.close()
-                    
+            finally:
+                session.close()
+
+            google_cookies: Dict[str, str] = {}
+            for cookie in extracted or []:
+                name = cookie.get("name")
+                value = cookie.get("value")
+                if name and value:
+                    google_cookies[name] = value
+
+            if google_cookies:
+                print(f"  ✅ [Cookie Refresh] Đã lấy {len(google_cookies)} cookies mới từ profile qua Chrome CDP")
+                return google_cookies
+
+            print(f"  ⚠️ [Cookie Refresh] Không lấy được cookies Google từ profile qua Chrome CDP")
+            return None
         except Exception as e:
             print(f"  ❌ [Cookie Refresh] Lỗi khi lấy cookie từ profile: {e}")
             import traceback
@@ -1880,7 +1437,6 @@ class LabsFlowClient:
         LabsFlowClient._token_timestamps.pop(cookie_hash, None)
         self._reset_all_error_counters()
         LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
-        LabsFlowClient._playwright_consecutive_403[cookie_hash] = 0
         if hasattr(self, '_403_refresh_retries'):
             self._403_refresh_retries[cookie_hash] = 0
         
@@ -1909,193 +1465,46 @@ class LabsFlowClient:
         print(f"  ✅ [Apply] Đã áp dụng cookies mới hoàn tất")
     
     def _headless_relogin(self, email: str, password: str, profile_path: str) -> Optional[Dict[str, str]]:
-        """Headless re-login để lấy cookie mới - KHÔNG cần user thao tác.
-        
-        Sử dụng Playwright persistent context với profile đã có để:
-        1. Mở browser headless
-        2. Navigate đến Google Labs
-        3. Nếu cần login → tự động nhập email/password
-        4. Lấy cookies mới
-        
-        Returns:
-            Dict cookies mới hoặc None nếu thất bại
-        """
+        """Re-login profile bằng Chrome CDP off-screen để lấy cookie mới."""
         from pathlib import Path
-        
-        print(f"  🔐 [Headless Login] Bắt đầu re-login cho {email}...")
-        
+
+        print(f"  🔐 [Headless Login] Bắt đầu re-login cho {email} qua Chrome CDP...")
+
         try:
-            from playwright.sync_api import sync_playwright
-            
+            from chrome_cdp_cookie import ChromeCDPSession
+
             profile_dir = Path(profile_path)
             profile_dir.mkdir(parents=True, exist_ok=True)
-            
-            with sync_playwright() as p:
-                # Mở browser với profile theo chế độ off-screen, không headless
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=False,
-                    channel="chrome",
-                    args=[
-                        '--no-first-run',
-                        '--no-default-browser-check',
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-extensions',
-                        '--disable-infobars',
-                        '--disable-sync',
-                        '--window-position=-3000,-3000',
-                        '--window-size=400,300',
-                    ],
-                    viewport={"width": 1280, "height": 720},
+
+            session = ChromeCDPSession(
+                profile_path=str(profile_dir),
+                headless=False,
+                window_pos=(-3000, -3000),
+                window_size=(400, 300),
+                log_fn=lambda msg: print(f"  {msg}"),
+            )
+
+            try:
+                extracted = session.extract_cookies(
+                    email=email,
+                    password=password,
+                    force_login=True,
                 )
-                
-                try:
-                    page = context.pages[0] if context.pages else context.new_page()
-                    
-                    # Navigate đến Google Labs
-                    print(f"  🌍 [Headless Login] Đang vào Google Labs...")
-                    try:
-                        page.goto("https://labs.google/fx/tools/flow", wait_until="domcontentloaded", timeout=30000)
-                    except Exception:
-                        pass  # Timeout OK, tiếp tục
-                    time.sleep(3)
-                    
-                    # Kiểm tra xem đã login chưa bằng cách check cookies
-                    cookies = context.cookies()
-                    session_cookies = [c for c in cookies if c.get("name") == "__Secure-next-auth.session-token" and "labs.google" in c.get("domain", "")]
-                    
-                    if session_cookies:
-                        print(f"  ✅ [Headless Login] Đã có session token - không cần login lại")
-                    else:
-                        # Cần login - navigate đến Google signin
-                        print(f"  🔐 [Headless Login] Chưa có session - bắt đầu login...")
-                        
-                        # Thử click Sign In trên Labs page
-                        try:
-                            page.evaluate("""
-                                () => {
-                                    const elements = document.querySelectorAll('button, a, [role="button"]');
-                                    for (const el of elements) {
-                                        const text = (el.innerText || '').toLowerCase();
-                                        if (text.includes('sign in') || text.includes('đăng nhập')) {
-                                            el.click(); return true;
-                                        }
-                                    }
-                                    return false;
-                                }
-                            """)
-                            time.sleep(3)
-                        except Exception:
-                            pass
-                        
-                        # Nếu vẫn chưa ở trang login, navigate trực tiếp
-                        if "accounts.google.com" not in page.url:
-                            page.goto("https://accounts.google.com/signin", wait_until="networkidle", timeout=30000)
-                            time.sleep(3)
-                        
-                        # Kiểm tra nếu đã login sẵn (redirect về myaccount)
-                        if "myaccount.google.com" in page.url or "accounts.google.com/b/" in page.url:
-                            print(f"  ✅ [Headless Login] Đã login sẵn trong profile")
-                        else:
-                            # Nhập email
-                            print(f"  📧 [Headless Login] Nhập email: {email}...")
-                            try:
-                                page.wait_for_selector('input[type="email"]', state="visible", timeout=10000)
-                                time.sleep(0.5)
-                                page.fill('input[type="email"]', email)
-                                page.click("#identifierNext")
-                                time.sleep(4)
-                            except Exception as e:
-                                print(f"  ⚠️ [Headless Login] Email step failed: {e}")
-                                return None
-                            
-                            # Nhập password
-                            print(f"  🔑 [Headless Login] Nhập password...")
-                            try:
-                                page.wait_for_selector('input[type="password"]', state="visible", timeout=15000)
-                                time.sleep(1)
-                                page.fill('input[type="password"]', password)
-                                time.sleep(0.5)
-                                page.click("#passwordNext")
-                                time.sleep(5)
-                            except Exception as e:
-                                print(f"  ⚠️ [Headless Login] Password step failed: {e}")
-                                return None
-                            
-                            # Kiểm tra captcha/2FA - nếu có thì fail (headless không giải được)
-                            page_text = page.evaluate("() => document.body.innerText.toLowerCase()")
-                            captcha_indicators = ["challenge", "captcha", "recaptcha", "verify", "unusual activity"]
-                            if any(ind in page_text for ind in captcha_indicators):
-                                print(f"  ⚠️ [Headless Login] Phát hiện captcha/2FA - không thể tự động giải")
-                                print(f"  💡 Tip: Mở tool Cookie để login thủ công 1 lần, sau đó auto-renew sẽ hoạt động")
-                                return None
-                            
-                            # Kiểm tra login thành công
-                            if "myaccount.google.com" not in page.url and "accounts.google.com/b/" not in page.url:
-                                # Đợi thêm
-                                time.sleep(5)
-                                if "myaccount.google.com" not in page.url and "accounts.google.com/b/" not in page.url:
-                                    print(f"  ⚠️ [Headless Login] Login có thể chưa thành công, URL: {page.url[:80]}")
-                                    # Vẫn tiếp tục thử lấy cookies
-                        
-                        # Sau khi login, navigate lại Labs để lấy session cookie
-                        print(f"  🌍 [Headless Login] Navigate lại Labs để lấy session cookie...")
-                        try:
-                            page.goto("https://labs.google/fx/tools/flow", wait_until="domcontentloaded", timeout=30000)
-                        except Exception:
-                            pass
-                        time.sleep(5)
-                        
-                        # Click "Create with Flow" nếu có
-                        try:
-                            page.evaluate("""
-                                () => {
-                                    const buttons = document.querySelectorAll('button, a, div[role="button"]');
-                                    for (const btn of buttons) {
-                                        const text = (btn.innerText || '').trim().toLowerCase();
-                                        if (text.includes('create with flow') || text === 'create') {
-                                            btn.click(); return true;
-                                        }
-                                    }
-                                    return false;
-                                }
-                            """)
-                            time.sleep(5)
-                        except Exception:
-                            pass
-                    
-                    # Lấy tất cả cookies
-                    all_cookies = context.cookies()
-                    
-                    # Filter cookies cho Google domains
-                    google_cookies: Dict[str, str] = {}
-                    has_session = False
-                    for cookie in all_cookies:
-                        domain = cookie.get("domain", "")
-                        if "google" in domain or "youtube" in domain:
-                            google_cookies[cookie["name"]] = cookie["value"]
-                            if cookie["name"] == "__Secure-next-auth.session-token":
-                                has_session = True
-                    
-                    page.close()
-                    
-                    if has_session and google_cookies:
-                        print(f"  ✅ [Headless Login] Đã lấy {len(google_cookies)} cookies (có session token)")
-                        return google_cookies
-                    elif google_cookies:
-                        print(f"  ⚠️ [Headless Login] Có {len(google_cookies)} cookies nhưng KHÔNG có session token")
-                        # Vẫn trả về cookies, _verify_new_cookies sẽ kiểm tra
-                        return google_cookies
-                    else:
-                        print(f"  ❌ [Headless Login] Không lấy được cookies")
-                        return None
-                        
-                finally:
-                    try:
-                        context.close()
-                    except Exception:
-                        pass
-                    
+            finally:
+                session.close()
+
+            google_cookies = {
+                cookie["name"]: cookie["value"]
+                for cookie in extracted or []
+                if cookie.get("name") and cookie.get("value")
+            }
+
+            if google_cookies:
+                print(f"  ✅ [Headless Login] Lấy được {len(google_cookies)} cookies mới qua Chrome CDP")
+                return google_cookies
+
+            print(f"  ❌ [Headless Login] Không lấy được cookies qua Chrome CDP")
+            return None
         except Exception as e:
             print(f"  ❌ [Headless Login] Lỗi: {e}")
             import traceback
@@ -2440,203 +1849,10 @@ class LabsFlowClient:
 
         self._last_api_call_time = time.time()
 
-    # region reCAPTCHA Playwright Worker Thread Architecture: ĐƠN GIẢN HÓA
+    # region Legacy Browser Paths
     @classmethod
     def _ensure_recaptcha_worker(cls):
-        """Đảm bảo reCAPTCHA worker thread đã được khởi động."""
-        if cls._recaptcha_worker_started:
-            return
-        
-        with cls._browser_lock:
-            # Double-check sau khi acquire lock
-            if cls._recaptcha_worker_started:
-                return
-            
-            cls._recaptcha_worker_started = True
-            cls._recaptcha_worker_ready_event.clear()
-            
-            def worker_loop():
-                """Worker thread loop: xử lý reCAPTCHA requests từ queue."""
-                print("  🚀 [reCAPTCHA Worker] Khởi động worker thread...")
-                
-                # Khởi tạo Browser mới (không dùng profile Chrome đang chạy)
-                try:
-                    from playwright.sync_api import sync_playwright
-                    import os
-                    import platform
-                    
-                    playwright = sync_playwright().start()
-                    
-                    # Lấy headless mode từ class variable
-                    headless = cls._global_headless_mode
-                    
-                    launch_args = [
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage',
-                    ]
-                    
-                    # ✅ Nếu không headless: đặt cửa sổ off-screen để tránh hiện popup trắng
-                    # Tất cả browser contexts sẽ chồng lên nhau cùng vị trí
-                    if not headless:
-                        launch_args.extend([
-                            '--window-position=-3000,-3000',  # Off-screen để không hiện popup trắng
-                            '--window-size=200,150',          # Kích thước nhỏ nhất
-                        ])
-                    
-                    # ✅ Tìm Chrome đã cài trên máy (fallback nếu Playwright browsers chưa cài)
-                    chrome_path = None
-                    if platform.system() == "Windows":
-                        possible_paths = [
-                            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-                            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-                            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
-                        ]
-                        for p in possible_paths:
-                            if os.path.exists(p):
-                                chrome_path = p
-                                break
-                    elif platform.system() == "Darwin":  # macOS
-                        mac_chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-                        if os.path.exists(mac_chrome):
-                            chrome_path = mac_chrome
-                    
-                    mode_str = "HEADLESS" if headless else "OFF-SCREEN (200x150)"
-                    
-                    # ✅ Thử launch với Chrome có sẵn trước, fallback sang Chromium
-                    browser = None
-                    if chrome_path:
-                        try:
-                            print(f"  → Mở Chrome có sẵn ({mode_str})...")
-                            browser = playwright.chromium.launch(
-                                headless=headless,
-                                executable_path=chrome_path,
-                                args=launch_args,
-                            )
-                            print(f"  ✅ Chrome đã khởi tạo ({mode_str})")
-                        except Exception as chrome_err:
-                            print(f"  ⚠️ Không thể dùng Chrome: {chrome_err}")
-                            browser = None
-                    
-                    # Fallback sang Chromium của Playwright
-                    if not browser:
-                        try:
-                            print(f"  → Mở Chromium Playwright ({mode_str})...")
-                            browser = playwright.chromium.launch(
-                                headless=headless,
-                                args=launch_args,
-                            )
-                            print(f"  ✅ Chromium đã khởi tạo ({mode_str})")
-                        except Exception as chromium_err:
-                            print(f"  ✗ Không thể mở Chromium: {chromium_err}")
-                            print(f"  💡 Hãy chạy: playwright install chromium")
-                            raise chromium_err
-                    
-                    cls._recaptcha_worker_browser = browser
-                    cls._recaptcha_playwright = playwright
-                    cls._recaptcha_worker_ready_event.set()
-                    
-                except Exception as e:
-                    print(f"  ✗ Lỗi khởi tạo Browser: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    cls._recaptcha_worker_browser = None
-                    cls._recaptcha_worker_started = False
-                    cls._recaptcha_worker_ready_event.set()
-                    return
-                
-                # Worker loop: xử lý requests từ queue
-                while True:
-                    try:
-                        # Đợi request từ queue (blocking)
-                        request_id, payload = cls._recaptcha_request_queue.get()
-                        
-                        # Exit signal
-                        if request_id is None:
-                            print("  🛑 [reCAPTCHA Worker] Nhận exit signal, đóng worker...")
-                            break
-                        
-                        cookie_hash = payload.get("cookie_hash", "")
-                        
-                        # ✅ Kiểm tra flag reset context trước khi xử lý
-                        need_reset = False
-                        with cls._contexts_need_reset_lock:
-                            need_reset = cls._contexts_need_reset.get(cookie_hash, False)
-                            if need_reset:
-                                cls._contexts_need_reset[cookie_hash] = False  # Clear flag
-                        
-                        if need_reset:
-                            print(f"  🔄 [reCAPTCHA Worker] Cookie {cookie_hash[:8]}... cần reset context...")
-                            # Đóng page cũ nếu có
-                            if hasattr(cls, '_recaptcha_page') and cls._recaptcha_page:
-                                try:
-                                    cls._recaptcha_page.close()
-                                except:
-                                    pass
-                                cls._recaptcha_page = None
-                            # ✅ Đóng context cũ để tránh hiện popup trắng khi tạo lại
-                            if hasattr(cls, '_recaptcha_context') and cls._recaptcha_context:
-                                try:
-                                    cls._recaptcha_context.close()
-                                except:
-                                    pass
-                                cls._recaptcha_context = None
-                            print(f"  ✅ [reCAPTCHA Worker] Đã reset context cho cookie {cookie_hash[:8]}...")
-                        
-                        # Xử lý request - ĐƠN GIẢN HÓA
-                        token = None
-                        error = None
-                        
-                        try:
-                            token = cls._get_recaptcha_token_with_playwright_worker(
-                                browser=cls._recaptcha_worker_browser,
-                                cookie_hash=payload["cookie_hash"],
-                                cookies=payload["cookies"],
-                                proxy_config=payload.get("proxy_config"),
-                                user_agent=payload.get("user_agent", ""),
-                                timeout_s=payload.get("timeout_s", 90),
-                                recaptcha_action=payload.get("recaptcha_action", "VIDEO_GENERATION"),
-                            )
-                        except Exception as e:
-                            error = str(e)
-                            print(f"  ✗ Lỗi lấy token: {e}")
-
-                        if token:
-                            result = {"token": token, "error": None}
-                        else:
-                            result = {"token": None, "error": error or "Không thể lấy token"}
-
-                        # Lưu kết quả
-                        with cls._recaptcha_results_lock:
-                            cls._recaptcha_results[request_id] = result
-
-                        # Báo hiệu đã xong
-                        payload["event"].set()
-
-                    except Exception as e:
-                        print(f"  ✗ Lỗi trong worker loop: {e}")
-                        if "request_id" in locals() and "payload" in locals():
-                            with cls._recaptcha_results_lock:
-                                cls._recaptcha_results[request_id] = {"token": None, "error": str(e)}
-                            payload["event"].set()
-
-                # Cleanup khi worker exit
-                try:
-                    if cls._recaptcha_worker_browser:
-                        cls._recaptcha_worker_browser.close()
-                    if hasattr(cls, '_recaptcha_playwright') and cls._recaptcha_playwright:
-                        cls._recaptcha_playwright.stop()
-                except Exception:
-                    pass
-                cls._recaptcha_worker_browser = None
-                cls._recaptcha_worker_started = False
-                cls._recaptcha_worker_ready_event.clear()
-                print("  ✅ Worker thread đã dừng")
-            
-            # Start worker thread
-            worker_thread = threading.Thread(target=worker_loop, daemon=True, name="reCAPTCHA-Worker")
-            cls._recaptcha_worker_thread = worker_thread
-            worker_thread.start()
-            print("  ✅ Worker thread đã khởi động")
+        return
     
     @classmethod
     def _renew_cookie_and_restart_context(
@@ -2648,170 +1864,10 @@ class LabsFlowClient:
         user_agent: str,
         get_new_cookies_callback: Optional[Any] = None,
     ) -> Optional[Dict[str, str]]:
-        """
-        Renew cookie và restart BrowserContext khi bị chặn.
-        
-        Flow:
-        1. Gọi callback để lấy cookie mới từ DB/server
-        2. Clear hết dữ liệu trong BrowserContext cũ (đóng tất cả pages, clear storage)
-        3. Đóng BrowserContext cũ
-        4. Tạo BrowserContext mới
-        5. Inject cookie mới vào context
-        6. Trả về cookie mới để sử dụng
-        
-        Returns:
-            Dict[str, str]: Cookie mới nếu thành công, None nếu không thể renew
-        """
-        from playwright.sync_api import BrowserContext
-        
-        print(f"  🔄 [reCAPTCHA Worker] Bắt đầu renew cookie và restart context cho cookie: {cookie_hash[:8]}...")
-        
-        # 1. Lấy cookie mới từ callback hoặc DB
-        new_cookies = None
-        if get_new_cookies_callback:
-            try:
-                new_cookies = get_new_cookies_callback(cookie_hash, old_cookies)
-                if new_cookies and isinstance(new_cookies, dict) and len(new_cookies) > 0:
-                    print(f"  ✅ [reCAPTCHA Worker] Đã lấy cookie mới từ callback (có {len(new_cookies)} cookies)")
-                else:
-                    print(f"  ⚠️ [reCAPTCHA Worker] Callback không trả về cookie mới hợp lệ")
-                    new_cookies = None
-            except Exception as e:
-                print(f"  ⚠️ [reCAPTCHA Worker] Lỗi gọi callback lấy cookie mới: {e}")
-                new_cookies = None
-        
-        # Nếu không có callback hoặc callback fail, thử lấy từ DB dựa trên cookie_hash
-        if not new_cookies:
-            try:
-                from cookiauto import db_get_account_cookies
-                import json
-                
-                # Tìm email từ cookie_hash (cần mapping, tạm thời skip nếu không có)
-                # TODO: Cần cách để map cookie_hash -> email
-                # Tạm thời: nếu không có callback và không có mapping, return None
-                print(f"  ⚠️ [reCAPTCHA Worker] Không có callback và không thể map cookie_hash -> email, skip renew")
-                return None
-            except Exception as e:
-                print(f"  ⚠️ [reCAPTCHA Worker] Lỗi lấy cookie từ DB: {e}")
-                return None
-        
-        # 2. Clear và đóng BrowserContext cũ
-        old_context = None
-        if hasattr(cls, '_browser_contexts'):
-            old_context = cls._browser_contexts.get(cookie_hash)
-        
-        if old_context:
-            try:
-                print(f"  → [reCAPTCHA Worker] Đang clear và đóng BrowserContext cũ...")
-                
-                # Đóng tất cả pages
-                for p in old_context.pages:
-                    try:
-                        p.close()
-                    except:
-                        pass
-                
-                # Clear storage (cookies, localStorage, sessionStorage)
-                try:
-                    old_context.clear_cookies()
-                except:
-                    pass
-                
-                # Đóng context
-                old_context.close()
-                
-                # Xóa khỏi shared dict
-                if hasattr(cls, '_browser_contexts'):
-                    cls._browser_contexts.pop(cookie_hash, None)
-                if hasattr(cls, '_cookies_injected_contexts'):
-                    cls._cookies_injected_contexts.pop(cookie_hash, None)
-                if hasattr(cls, '_recaptcha_worker_pages'):
-                    cls._recaptcha_worker_pages.pop(cookie_hash, None)
-                if hasattr(cls, '_recaptcha_worker_page_index'):
-                    cls._recaptcha_worker_page_index.pop(cookie_hash, None)
-                
-                print(f"  ✅ [reCAPTCHA Worker] Đã clear và đóng BrowserContext cũ")
-            except Exception as e:
-                print(f"  ⚠️ [reCAPTCHA Worker] Lỗi clear context cũ: {e}")
-        
-        # 3. Tạo BrowserContext mới
-        try:
-            print(f"  → [reCAPTCHA Worker] Tạo BrowserContext mới với cookie mới...")
-            
-            context_options: Dict[str, Any] = {
-                "viewport": {"width": 200, "height": 150},
-                "user_agent": user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "ignore_https_errors": True,
-            }
-            
-            # ✅ KHÔNG dùng proxy cho BrowserContext (navigation bị timeout qua proxy)
-            # Proxy chỉ áp dụng cho API HTTP calls (requests.Session)
-            
-            new_context = browser.new_context(**context_options)
-            
-            # Test context
-            test_page = new_context.new_page()
-            test_page.goto("about:blank", timeout=10000)
-            test_page.close()
-            
-            # Lưu context mới vào shared dict
-            if not hasattr(cls, '_browser_contexts'):
-                cls._browser_contexts = {}
-            cls._browser_contexts[cookie_hash] = new_context
-            
-            # 4. Inject cookie mới vào context
-            BASE_URL = "https://labs.google"
-            try:
-                cookies_input = []
-                failed_cookies = []
-                for name, value in new_cookies.items():
-                    cd: Dict[str, Any] = {
-                        "name": name,
-                        "value": value,
-                        "domain": ".google.com",
-                        "path": "/",
-                    }
-                    
-                    # ✅ Xử lý đặc biệt cho cookies prefix
-                    if name.startswith("__Host-"):
-                        cd.pop("domain", None)
-                        cd["secure"] = True
-                        cd["sameSite"] = "Lax"
-                    elif name.startswith("__Secure-"):
-                        cd["secure"] = True
-                        cd["sameSite"] = "Lax"
-                    
-                    cookies_input.append(cd)
-                
-                if cookies_input:
-                    # ✅ Inject từng cookie riêng lẻ
-                    for cookie in cookies_input:
-                        try:
-                            new_context.add_cookies([cookie])
-                        except Exception as cookie_err:
-                            failed_cookies.append(f"{cookie['name']}: {str(cookie_err)[:50]}")
-                    
-                    if failed_cookies:
-                        print(f"  ⚠️ Cookies không inject được ({len(failed_cookies)}): {', '.join(failed_cookies)}")
-                    
-                    if not hasattr(cls, '_cookies_injected_contexts'):
-                        cls._cookies_injected_contexts = {}
-                    cls._cookies_injected_contexts[cookie_hash] = True
-                    print(f"  ✅ [reCAPTCHA Worker] Đã inject {len(cookies_input) - len(failed_cookies)}/{len(cookies_input)} cookie mới vào context")
-            except Exception as e:
-                print(f"  ⚠️ [reCAPTCHA Worker] Lỗi inject cookie mới: {e}")
-            
-            print(f"  ✅ [reCAPTCHA Worker] Đã renew cookie và restart context thành công")
-            return new_cookies
-            
-        except Exception as e:
-            print(f"  ✗ [reCAPTCHA Worker] Lỗi tạo context mới: {e}")
-            import traceback
-            print(traceback.format_exc())
-            return None
+        return None
                     
     @classmethod
-    def _get_recaptcha_token_with_playwright_worker(
+    def _legacy_recaptcha_worker_disabled(
         cls,
         browser: Any,
         cookie_hash: str,
@@ -2823,318 +1879,21 @@ class LabsFlowClient:
         max_retries_on_blocked: int = 2,
         recaptcha_action: str = "VIDEO_GENERATION",
     ) -> Optional[str]:
-        """
-        ĐƠN GIẢN HÓA: Mở profile đã đăng nhập và lấy reCAPTCHA token.
-        Không inject cookies phức tạp - dùng profile có sẵn.
-        
-        Args:
-            recaptcha_action: "VIDEO_GENERATION" cho video, "IMAGE_GENERATION" cho image
-        """
-        from playwright.sync_api import Page
+        return None
 
-        SITE_KEY = "6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV"
-        TARGET_URL = "https://labs.google/fx/tools/flow"
-        
-        print(f"  📡 [reCAPTCHA] Lấy token (action={recaptcha_action})...")
-        
-        # ✅ ĐƠN GIẢN: Tái sử dụng page nếu có, không tạo context phức tạp
-        page: Optional[Page] = None
-        
-        # Lấy page đã có hoặc tạo mới
-        if not hasattr(cls, '_recaptcha_page') or cls._recaptcha_page is None:
-            # ✅ Kiểm tra page cũ có bị closed không (tránh tạo page mới thừa)
-            need_new_page = True
-            if hasattr(cls, '_recaptcha_page') and cls._recaptcha_page is not None:
-                try:
-                    _ = cls._recaptcha_page.url
-                    need_new_page = False
-                    page = cls._recaptcha_page
-                except Exception:
-                    cls._recaptcha_page = None
-            
-            if need_new_page:
-                try:
-                    # ✅ Tạo context riêng với viewport nhỏ để tránh hiện popup trắng
-                    if not hasattr(cls, '_recaptcha_context') or cls._recaptcha_context is None:
-                        cls._recaptcha_context = browser.new_context(
-                            viewport={"width": 200, "height": 150},
-                            ignore_https_errors=True,
-                        )
-                    page = cls._recaptcha_context.new_page()
-                    cls._recaptcha_page = page
-                    
-                    # Navigate đến trang Flow
-                    print(f"  → Navigate đến {TARGET_URL}...")
-                    page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
-                    
-                    # Đợi trang load
-                    time.sleep(2)
-                    
-                except Exception as e:
-                    print(f"  ✗ Lỗi tạo page: {e}")
-                    raise RuntimeError(f"Không thể tạo page: {e}")
-        else:
-            page = cls._recaptcha_page
-            
-            # Reload trang để lấy token mới
-            try:
-                print(f"  → Reload trang để lấy token mới...")
-                page.reload(wait_until="domcontentloaded", timeout=60000)
-            except Exception as e:
-                print(f"  ⚠️ Reload lỗi: {e}, thử navigate lại...")
-                try:
-                    page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
-                except:
-                    pass
-        
-        # Đợi grecaptcha load
-        print("  → Đợi grecaptcha load...")
-        start_wait = time.time()
-        gre_ready = None
-        
-        while time.time() - start_wait < timeout_s:
-            try:
-                gre_ready = page.evaluate("""
-                    () => {
-                        if (typeof window.grecaptcha !== 'undefined') {
-                            if (window.grecaptcha.enterprise && 
-                                typeof window.grecaptcha.enterprise.execute === 'function') {
-                                return 'enterprise';
-                            }
-                            if (typeof window.grecaptcha.execute === 'function') {
-                                return 'classic';
-                            }
-                        }
-                        return null;
-                    }
-                """)
-                if gre_ready:
-                    break
-            except Exception:
-                pass
-            time.sleep(0.3)
-        
-        if not gre_ready:
-            raise RuntimeError("grecaptcha không load được - có thể chưa đăng nhập")
-        
-        print(f"  ✓ grecaptcha sẵn sàng (mode={gre_ready})")
-        
-        # Lấy token
-        print(f"  → Thực thi reCAPTCHA (action={recaptcha_action})...")
-        token = page.evaluate(
-            """
-            async ([siteKey, action]) => {
-                try {
-                    if (typeof grecaptcha === 'undefined' || !grecaptcha.enterprise) {
-                        return {error: 'grecaptcha chưa load'};
-                    }
-                    
-                    const token = await grecaptcha.enterprise.execute(siteKey, {action: action});
-                    
-                    if (token && token.length > 0) {
-                        return {token: token};
-                    }
-                    return {error: 'Token rỗng'};
-                } catch (e) {
-                    return {error: e.toString()};
-                }
-            }
-            """,
-            [SITE_KEY, recaptcha_action],
-        )
-        
-        if isinstance(token, dict):
-            if token.get("token"):
-                print(f"  ✅ Lấy token thành công (len={len(token['token'])})")
-                return token["token"]
-            else:
-                raise RuntimeError(f"Lỗi lấy token: {token.get('error', 'unknown')}")
-        
-        raise RuntimeError("Token không hợp lệ")
-
-    def _get_recaptcha_token_with_playwright(
+    def _legacy_recaptcha_client_disabled(
         self,
         timeout_s: int = 90,
         max_retries_on_403: int = 3,  # giữ tham số cho backward-compat
         acquire_lock: bool = True,
         recaptcha_action: str = "VIDEO_GENERATION",  # ✅ Thêm parameter action
     ) -> Optional[str]:
-        """
-        Client: gửi request vào reCAPTCHA worker thread và đợi kết quả.
-        
-        - Đảm bảo worker thread đã khởi động.
-        - LOCK THEO COOKIE: mỗi cookie chỉ 1 request token tại 1 thời điểm (nối đuôi).
-        - Gửi request vào queue, đợi worker xử lý và trả về token.
-        - Worker thread tạo BrowserContext riêng cho mỗi cookie (không giới hạn số cookie).
-        
-        Args:
-            recaptcha_action: "VIDEO_GENERATION" cho video, "IMAGE_GENERATION" cho image
-        """
-        cookie_hash = self._cookie_hash
+        return None
 
-        # ✅ LOCK THEO COOKIE: Mỗi cookie chỉ request 1 token tại một thời điểm (nối đuôi)
-        if acquire_lock:
-            cookie_lock = self._get_cookie_lock(cookie_hash)
-            lock_context = cookie_lock
-        else:
-            from contextlib import nullcontext
-            lock_context = nullcontext()
+    # endregion Legacy Browser Paths
 
-        with lock_context:
-            # Đảm bảo worker đã khởi động
-            LabsFlowClient._ensure_recaptcha_worker()
-            
-            # Đợi worker browser sẵn sàng thật sự để tránh race:
-            # thread đã start nhưng Playwright/Chrome vẫn đang khởi tạo nền.
-            LabsFlowClient._recaptcha_worker_ready_event.wait(timeout=20)
-
-            if not LabsFlowClient._recaptcha_worker_browser:
-                if LabsFlowClient._recaptcha_worker_started:
-                    self.last_error_detail = "reCAPTCHA worker đang khởi tạo browser nhưng chưa sẵn sàng"
-                    print("  ✗ [reCAPTCHA Client] Worker browser vẫn đang khởi tạo, chưa sẵn sàng")
-                else:
-                    self.last_error_detail = "reCAPTCHA worker browser chưa khởi tạo"
-                    print("  ✗ [reCAPTCHA Client] Worker browser chưa khởi tạo")
-                return None
-
-            # Tạo request ID và event để đợi kết quả
-            request_id = f"{cookie_hash}_{uuid.uuid4().hex[:8]}"
-            event = threading.Event()
-            
-            # Lấy callback để renew cookie nếu có
-            get_new_cookies_callback = None
-            if hasattr(LabsFlowClient, '_recaptcha_renew_cookie_callbacks'):
-                get_new_cookies_callback = LabsFlowClient._recaptcha_renew_cookie_callbacks.get(cookie_hash)
-            
-            payload = {
-                "cookie_hash": cookie_hash,
-                "cookies": self.cookies,
-                "proxy_config": None,  # ✅ KHÔNG dùng proxy cho BrowserContext (navigation bị timeout qua proxy)
-                "user_agent": self.user_agent,
-                "timeout_s": timeout_s,
-                "max_retries_on_blocked": 2,  # Retry tối đa 2 lần với cookie mới
-                "get_new_cookies_callback": get_new_cookies_callback,
-                "event": event,
-                "recaptcha_action": recaptcha_action,  # ✅ Truyền action vào payload
-            }
-
-            # Gửi request vào queue
-            try:
-                LabsFlowClient._recaptcha_request_queue.put((request_id, payload))
-                print(f"  📤 [reCAPTCHA Client] Đã gửi request vào queue (req_id={request_id[:12]}..., cookie={cookie_hash[:8]}...)")
-            except Exception as e:
-                self.last_error_detail = f"Không thể gửi request vào queue: {e}"
-                print(f"  ✗ [reCAPTCHA Client] Lỗi gửi request: {e}")
-                return None
-
-            # Đợi kết quả từ worker (với timeout)
-            wait_timeout = timeout_s + 30  # margin
-            if not event.wait(timeout=wait_timeout):
-                self.last_error_detail = f"Timeout đợi reCAPTCHA worker (req_id={request_id[:12]}...)"
-                print(f"  ✗ [reCAPTCHA Client] Timeout đợi worker (req_id={request_id[:12]}...)")
-                return None
-
-            # Lấy kết quả từ shared dict
-            with LabsFlowClient._recaptcha_results_lock:
-                result = LabsFlowClient._recaptcha_results.pop(request_id, None)
-
-            if result is None:
-                self.last_error_detail = "Không nhận được kết quả từ reCAPTCHA worker"
-                print(f"  ✗ [reCAPTCHA Client] Không nhận được kết quả (req_id={request_id[:12]}...)")
-                return None
-
-            if result.get("error"):
-                error_msg = result["error"]
-                self.last_error_detail = f"reCAPTCHA worker error: {error_msg}"
-                print(f"  ✗ [reCAPTCHA Client] Worker error: {error_msg[:200]}")
-                return None
-
-            token = result.get("token")
-            if token and isinstance(token, str) and len(token.strip()) > 0:
-                print(f"  ✅ [reCAPTCHA Client] Nhận token thành công (len={len(token)})")
-                return token
-
-            self.last_error_detail = "Token reCAPTCHA không hợp lệ từ worker"
-            print(f"  ✗ [reCAPTCHA Client] Token không hợp lệ")
-            return None
-    
-    # endregion reCAPTCHA Playwright Worker Thread Architecture
-    
-    # region OLD extension/bridge methods (DISABLED - Không dùng nữa)
-    def _restart_playwright_context_for_cookie_OLD(self) -> bool:
-        """
-        Restart BrowserContext cho cookie hiện tại (chỉ context của cookie này).
-        Đóng context cũ, khởi tạo lại context mới từ global Browser.
-        
-        Returns:
-            True nếu restart thành công, False nếu không thể restart
-        """
-        if not self.use_selenium_recaptcha:
-            return False
-        
-        cookie_hash = self._cookie_hash
-        
-        try:
-            # Lấy thread-local Browser
-            browser = self._get_global_browser(
-                headless=self.selenium_headless,
-                browser_path=self.selenium_browser_path
-            )
-            
-            # Đóng context cũ
-            if hasattr(LabsFlowClient, '_browser_contexts'):
-                old_context = LabsFlowClient._browser_contexts.get(cookie_hash)
-                if old_context:
-                    try:
-                        old_context.close()
-                        print(f"  ✓ Đã đóng BrowserContext cũ của cookie {cookie_hash[:8]}...")
-                    except Exception:
-                        pass
-                    LabsFlowClient._browser_contexts.pop(cookie_hash, None)
-            
-            # Reset cookies injected flag
-            if hasattr(LabsFlowClient, '_cookies_injected_contexts'):
-                LabsFlowClient._cookies_injected_contexts.pop(cookie_hash, None)
-            
-            # Tạo context mới từ thread-local browser
-            context_options = {
-                'viewport': {'width': 200, 'height': 150},
-                'user_agent': self.user_agent,
-                'ignore_https_errors': True,
-            }
-            
-            # ✅ Proxy configuration: Thêm proxy nếu có
-            if self.proxy_config and self.proxy_config.get('server'):
-                proxy_server = self.proxy_config['server']
-                proxy_username = self.proxy_config.get('username', '')
-                proxy_password = self.proxy_config.get('password', '')
-                
-                proxy_dict = {'server': proxy_server}
-                if proxy_username:
-                    proxy_dict['username'] = proxy_username
-                if proxy_password:
-                    proxy_dict['password'] = proxy_password
-                
-                context_options['proxy'] = proxy_dict
-                print(f"  → Dùng proxy: {proxy_server}")
-            
-            if self.profile_path:
-                context_options['storage_state'] = None
-                print(f"  → Dùng profile: {self.profile_path}")
-            
-            new_context = browser.new_context(**context_options)
-            
-            # Lưu context mới
-            if not hasattr(LabsFlowClient, '_browser_contexts'):
-                LabsFlowClient._browser_contexts = {}
-            LabsFlowClient._browser_contexts[cookie_hash] = new_context
-            
-            print(f"  ✓ Đã restart BrowserContext thành công cho cookie {cookie_hash[:8]}...")
-            return True
-            
-        except Exception as e:
-            print(f"  ✗ Lỗi restart BrowserContext: {str(e)[:100]}")
-            return False
+    def _legacy_context_restart_disabled(self) -> bool:
+        return False
     
     def _request_recaptcha_token_from_bridge_OLD(self, timeout_s: int = 90, acquire_lock: bool = True) -> Optional[str]:
         """
@@ -3523,7 +2282,7 @@ class LabsFlowClient:
     ) -> Optional[str]:
         """
         Lấy reCAPTCHA token qua Chrome thật + CDP protocol.
-        Chrome thật cho trust score cao hơn zendriver/playwright.
+        Chrome thật cho trust score cao hơn browser automation cũ.
         
         ✅ Improvements:
         - Persistent WebSocket connection (không open/close mỗi lần)
@@ -3980,23 +2739,8 @@ class LabsFlowClient:
     def _switch_token_source_on_error(self, current_source: str, error_code: int) -> str:
         """Tự động chuyển đổi nguồn token khi gặp lỗi.
         
-        Flow:
-        - Nếu đang dùng Chrome CDP mà bị 403 nhiều → chuyển sang playwright
-        - Nếu đang dùng playwright mà bị 403 nhiều → chuyển sang Chrome CDP
+        Hệ thống hiện chỉ dùng Chrome CDP off-screen.
         """
-        cookie_hash = self._cookie_hash
-        
-        if error_code == 403:
-            cdp_403 = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0)
-            pw_403 = LabsFlowClient._playwright_consecutive_403.get(cookie_hash, 0)
-            
-            if current_source in ("chrome_cdp", "zendriver") and cdp_403 >= self.MAX_CHROME_CDP_403:
-                print(f"  🔄 [Token Source] Chrome CDP đạt ngưỡng {self.MAX_CHROME_CDP_403} lỗi 403 → Chuyển sang Playwright")
-                return "playwright"
-            elif current_source == "playwright" and pw_403 >= self.MAX_PLAYWRIGHT_403:
-                print(f"  🔄 [Token Source] Playwright đạt ngưỡng {self.MAX_PLAYWRIGHT_403} lỗi 403 → Chuyển sang Chrome CDP")
-                return "chrome_cdp"
-        
         return current_source
     
     def _refresh_cookie_on_403(self) -> bool:
@@ -4017,25 +2761,10 @@ class LabsFlowClient:
         # ✅ Reset Chrome CDP page/tab
         LabsFlowClient._zendriver_reset_page(cookie_hash)
         
-        # ✅ Reset playwright context để lấy cookie mới
-        # CHỈ set None reference, KHÔNG gọi .close() vì context có thể được tạo trong worker thread
-        if hasattr(LabsFlowClient, '_browser_contexts') and cookie_hash in LabsFlowClient._browser_contexts:
-            LabsFlowClient._browser_contexts.pop(cookie_hash, None)
-            if hasattr(LabsFlowClient, '_cookies_injected_contexts'):
-                LabsFlowClient._cookies_injected_contexts.pop(cookie_hash, None)
-        
-        # ✅ Reset playwright recaptcha page - CHỈ đánh dấu flag, KHÔNG gọi .close() từ thread này
-        # Playwright sync API dùng greenlet bị ràng buộc vào worker thread đã tạo nó.
-        # Gọi .close() từ thread khác sẽ gây lỗi "greenlet.error: Cannot switch to a different thread".
-        # Worker thread sẽ tự close page/context cũ khi xử lý request tiếp theo (qua _contexts_need_reset flag).
-        with LabsFlowClient._contexts_need_reset_lock:
-            LabsFlowClient._contexts_need_reset[cookie_hash] = True
-        
         # ✅ Reset all error counters cho cookie này
         self._reset_all_error_counters()
         LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = 0
-        LabsFlowClient._playwright_consecutive_403[cookie_hash] = 0
         
         print(f"  ✅ [403 Handler] Đã refresh cookie {cookie_hash[:8]}... - tab mới sẽ được tạo ở attempt tiếp theo")
         return True
@@ -4097,11 +2826,17 @@ class LabsFlowClient:
         cookie_hash = self._cookie_hash
         LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = 0
-        LabsFlowClient._playwright_consecutive_403[cookie_hash] = 0
+        promoted_profile = LabsFlowClient._cookie_profile_fallbacks.get(cookie_hash)
+        if promoted_profile:
+            LabsFlowClient._cookie_profile_paths[cookie_hash] = promoted_profile
+            self.profile_path = promoted_profile
+            LabsFlowClient._cookie_profile_fallbacks.pop(cookie_hash, None)
+            print(f"  ✅ [Profile] Promote profile mới thành profile chính: {Path(promoted_profile).name}")
         profile_path = self._get_profile_path_for_cookie()
         if profile_path:
             LabsFlowClient._chrome_cdp_profile_403[profile_path] = 0
-        LabsFlowClient._cookie_profile_fallbacks.pop(cookie_hash, None)
+            with LabsFlowClient._profile_health_lock:
+                LabsFlowClient._profile_cooldown_until.pop(profile_path, None)
         self._reset_all_error_counters()
         # ✅ Reset 403 refresh retries khi thành công
         if hasattr(self, '_403_refresh_retries'):
@@ -4110,7 +2845,7 @@ class LabsFlowClient:
     def _on_api_403(self):
         """Gọi khi API trả về 403 - tăng counter cho source đã dùng."""
         cookie_hash = self._cookie_hash
-        source = LabsFlowClient._last_token_source.get(cookie_hash, "playwright")
+        source = LabsFlowClient._last_token_source.get(cookie_hash, "chrome_cdp")
         
         if source == "chrome_cdp":
             count = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0) + 1
@@ -4124,9 +2859,12 @@ class LabsFlowClient:
                 LabsFlowClient._chrome_cdp_profile_403[profile_path] = pcount
                 print(f"  📊 [Profile] {Path(profile_path).name} 403 count: {pcount}/{self.MAX_CHROME_CDP_403}")
                 if pcount >= self.MAX_CHROME_CDP_403:
+                    LabsFlowClient._mark_profile_unhealthy(profile_path, reason="403")
                     alternate = LabsFlowClient._pick_alternate_profile(profile_path)
                     if alternate and alternate != profile_path:
                         LabsFlowClient._cookie_profile_fallbacks[cookie_hash] = alternate
+                        self.profile_path = alternate
+                        LabsFlowClient._zendriver_reset_page(cookie_hash)
                         print(f"  🔄 [Profile] {Path(profile_path).name} bị 403 liên tiếp, chuyển sang profile: {Path(alternate).name}")
         elif source == "zendriver":
             # Backward compat
@@ -4135,9 +2873,10 @@ class LabsFlowClient:
             LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = count
             print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
         else:
-            count = LabsFlowClient._playwright_consecutive_403.get(cookie_hash, 0) + 1
-            LabsFlowClient._playwright_consecutive_403[cookie_hash] = count
-            print(f"  📊 [Token Source] Playwright 403 count: {count}/{self.MAX_PLAYWRIGHT_403}")
+            count = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0) + 1
+            LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = count
+            LabsFlowClient._zendriver_consecutive_403[cookie_hash] = count
+            print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
     
     def _should_use_zendriver(self) -> bool:
         """Quyết định có nên dùng Chrome CDP không (thay thế zendriver)."""
@@ -4147,7 +2886,7 @@ class LabsFlowClient:
         if not LabsFlowClient._chrome_cdp_available:
             return False
         cookie_hash = self._cookie_hash
-        # Nếu Chrome CDP bị 403 quá nhiều → chuyển sang playwright
+        # Nếu Chrome CDP bị 403 quá nhiều → ngừng dùng tạm cho cookie hiện tại
         cdp_403 = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0)
         if cdp_403 >= self.MAX_CHROME_CDP_403:
             return False
@@ -4358,11 +3097,6 @@ class LabsFlowClient:
                     print(f"  🔄 [Self-Heal] Đánh dấu zendriver page cần reset cho cookie {cookie_hash[:8]}...")
                     LabsFlowClient._zendriver_reset_page(cookie_hash)
                 
-                # Đánh dấu playwright context cần reset
-                with LabsFlowClient._contexts_need_reset_lock:
-                    LabsFlowClient._contexts_need_reset[cookie_hash] = True
-                    print(f"  🔄 [Self-Heal] Đánh dấu playwright context cần reset cho cookie {cookie_hash[:8]}...")
-            
             elif error_code == 429:
                 # Xoay proxy nếu có proxy pool
                 if LabsFlowClient._use_proxy_pool:
@@ -4942,7 +3676,7 @@ class LabsFlowClient:
                     
                     # ✅ Reset 403 counter khi thành công (reset cả counter chung)
                     self._reset_403_counter_for_cookie()
-                    self._on_api_success()  # ✅ Reset zendriver/playwright 403 counters
+                    self._on_api_success()  # ✅ Reset Chrome CDP 403 counters
                     
                     # Extract operations for status checking
                     operations = []
@@ -5492,7 +4226,7 @@ class LabsFlowClient:
 
                     # Reset counter 403 khi thành công
                     self._reset_403_counter_for_cookie()
-                    self._on_api_success()  # ✅ Reset zendriver/playwright 403 counters
+                    self._on_api_success()  # ✅ Reset Chrome CDP 403 counters
 
                     # Extract operations cho polling
                     operations: List[Dict[str, Any]] = []

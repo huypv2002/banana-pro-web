@@ -116,6 +116,20 @@
     <button class="btn btn-run" id="runBtn" onclick="startGeneration()">Tạo video</button>
     <button class="btn btn-stop" id="stopBtn" onclick="stopGeneration()" disabled>Dừng</button>
   </div>
+  <div class="card retry-card">
+    <div class="retry-card-head">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Chạy lại thông minh</div>
+        <div class="card-desc" id="retrySummary">Chưa có dữ liệu để chạy lại.</div>
+      </div>
+      <span class="badge badge-pending" id="retryStateBadge">Chờ</span>
+    </div>
+    <div class="retry-actions">
+      <button class="btn btn-outline" id="rerunFailedBtn" onclick="rerunFailedRows()" disabled>Chạy lại file lỗi</button>
+      <button class="btn btn-outline" id="rerunNeedsReviewBtn" onclick="rerunNeedsReviewRows()" disabled>Chạy lại file chưa đẹp</button>
+      <button class="btn btn-ghost" id="restoreBatchBtn" onclick="restoreOriginalBatchAfterRerun()" disabled>Khôi phục danh sách gốc</button>
+    </div>
+  </div>
   <div class="card auto-download-card">
     <label class="toggle-row" for="autoDownloadEachToggle">
       <div>

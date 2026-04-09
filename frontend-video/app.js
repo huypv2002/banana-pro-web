@@ -48,6 +48,8 @@ const savedVideoHistoryUrls = new Set();
 const autoDownloadedVideoUrls = new Set();
 let autoDownloadGuideAcknowledged = localStorage.getItem("bp_video_dl_guide") === "1";
 let autoDownloadEachEnabled = localStorage.getItem("bp_video_auto_each_download") === "1";
+const modeReviewFlags = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
+const modeRerunSnapshots = { t2v: null, i2v: null, fl: null, r2v: null };
 
 const MODE_CONFIG = {
   t2v: {
@@ -122,6 +124,7 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s || 
 function getBatchFiles() { return modeBatchFiles[currentMode]; }
 function setBatchFiles(files) { modeBatchFiles[currentMode] = files; }
 function getSourcePaths() { return modeSourcePaths[currentMode]; }
+function getReviewFlags() { return modeReviewFlags[currentMode]; }
 
 function apiFetch(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
@@ -190,6 +193,7 @@ function showTab(tab) {
   document.getElementById("navAdmin").classList.toggle("active", tab === "admin");
   if (tab === "history") loadHistory();
   if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { switchAdminSection(adminSection || "overview"); }
+  updateRetryUI();
 }
 
 // ── Video Mode ──
@@ -237,6 +241,7 @@ function setMode(mode) {
     document.getElementById("runBtn").disabled = false;
     document.getElementById("stopBtn").disabled = true;
   }
+  updateRetryUI();
 }
 
 function updateModelDesc() {
@@ -340,9 +345,12 @@ function loadTxtFile(input) {
   sourcePaths.folder = "";
   syncPromptSourceUI();
   setBatchFiles([]);
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
   const reader = new FileReader();
   reader.onload = e => {
-    setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" }]);
+    setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "Chờ" }]);
     renderBatchTable();
   };
   reader.readAsText(file);
@@ -355,12 +363,15 @@ function loadFolderTxt(input) {
   sourcePaths.txt = "";
   syncPromptSourceUI();
   setBatchFiles([]);
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
   let loaded = 0;
   const nextBatchFiles = [];
   files.forEach(file => {
     const r = new FileReader();
     r.onload = e => {
-      nextBatchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "⏳ Chờ" });
+      nextBatchFiles.push({ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "Chờ" });
       if (++loaded === files.length) {
         setBatchFiles(nextBatchFiles);
         renderBatchTable();
@@ -374,9 +385,13 @@ function clearSources() {
   setBatchFiles([]);
   modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
   modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
   modeSourcePaths[currentMode] = { txt: "", folder: "" };
+  latestJobState = null;
   syncPromptSourceUI();
   renderBatchTable();
+  updateRetryUI();
 }
 function renderBatchTable() {
   const batchFiles = getBatchFiles();
@@ -440,7 +455,9 @@ function handleRefRowImport(input) {
 function clearRefAll() {
   modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
   modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  modeReviewFlags[currentMode] = {};
   refreshRefCells();
+  updateRetryUI();
 }
 function removeRefImg(idx, imgIdx = null) {
   if (imgIdx !== null && Array.isArray(rowRefImages[idx])) {
@@ -450,6 +467,145 @@ function removeRefImg(idx, imgIdx = null) {
   refreshRefCells();
 }
 function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
+
+function countFailedRows() {
+  return (latestJobState?.videos || []).filter(v => v?.error).length;
+}
+
+function countNeedsReviewRows() {
+  return Object.values(getReviewFlags()).filter(Boolean).length;
+}
+
+function updateRetryUI() {
+  const failed = countFailedRows();
+  const needsReview = countNeedsReviewRows();
+  const rerunActive = !!modeRerunSnapshots[currentMode];
+  const summaryEl = document.getElementById("retrySummary");
+  const badgeEl = document.getElementById("retryStateBadge");
+  const failedBtn = document.getElementById("rerunFailedBtn");
+  const reviewBtn = document.getElementById("rerunNeedsReviewBtn");
+  const restoreBtn = document.getElementById("restoreBatchBtn");
+  if (!summaryEl || !badgeEl || !failedBtn || !reviewBtn || !restoreBtn) return;
+  summaryEl.textContent = rerunActive
+    ? `Đang mở danh sách rerun rút gọn. Lỗi: ${failed} dòng, chưa đẹp: ${needsReview} dòng.`
+    : `Hiện có ${failed} dòng lỗi và ${needsReview} dòng đã đánh dấu chưa đẹp trong batch hiện tại.`;
+  badgeEl.className = `badge ${rerunActive ? "badge-running" : (failed || needsReview ? "badge-done" : "badge-pending")}`;
+  badgeEl.textContent = rerunActive ? "Rerun" : (failed || needsReview ? "Sẵn sàng" : "Chờ");
+  failedBtn.disabled = !!currentJobId || failed === 0;
+  reviewBtn.disabled = !!currentJobId || needsReview === 0;
+  restoreBtn.disabled = !!currentJobId || !rerunActive;
+}
+
+function toggleNeedsReview(idx) {
+  const flags = getReviewFlags();
+  flags[idx] = !flags[idx];
+  if (!flags[idx]) delete flags[idx];
+  const row = document.getElementById(`resRow${idx}`);
+  if (row) row.classList.toggle("row-review", !!flags[idx]);
+  updateResults(latestJobState || { videos: [] });
+  updateRetryUI();
+}
+
+function buildRerunSubset(filter) {
+  const batchFiles = getBatchFiles();
+  const reviewFlags = getReviewFlags();
+  const videoResults = latestJobState?.videos || [];
+  const selected = [];
+  let globalIdx = 0;
+  batchFiles.forEach(file => {
+    const prompts = [];
+    file.prompts.forEach(prompt => {
+      const picked = filter === "failed" ? !!videoResults[globalIdx]?.error : !!reviewFlags[globalIdx];
+      if (picked) prompts.push({ prompt, sourceIdx: globalIdx });
+      globalIdx++;
+    });
+    if (prompts.length) selected.push({ name: file.name, prompts });
+  });
+  return selected;
+}
+
+function snapshotCurrentBatchForRerun() {
+  if (modeRerunSnapshots[currentMode]) return;
+  modeRerunSnapshots[currentMode] = {
+    batchFiles: JSON.parse(JSON.stringify(getBatchFiles())),
+    sourcePaths: { ...getSourcePaths() },
+    refImages: JSON.parse(JSON.stringify(modeRefImages[currentMode] || {})),
+    endImages: JSON.parse(JSON.stringify(modeEndImages[currentMode] || {})),
+    reviewFlags: { ...(modeReviewFlags[currentMode] || {}) },
+  };
+}
+
+function applyRerunSubset(subset, label) {
+  snapshotCurrentBatchForRerun();
+  const nextFiles = [];
+  const nextRefs = {};
+  const nextEnds = {};
+  const nextReview = {};
+  let nextIdx = 0;
+  subset.forEach(file => {
+    nextFiles.push({ name: `${file.name} • ${label}`, prompts: file.prompts.map(item => item.prompt), status: "Chờ" });
+    file.prompts.forEach(item => {
+      if (modeRefImages[currentMode]?.[item.sourceIdx] !== undefined) nextRefs[nextIdx] = JSON.parse(JSON.stringify(modeRefImages[currentMode][item.sourceIdx]));
+      if (modeEndImages[currentMode]?.[item.sourceIdx] !== undefined) nextEnds[nextIdx] = JSON.parse(JSON.stringify(modeEndImages[currentMode][item.sourceIdx]));
+      if (modeReviewFlags[currentMode]?.[item.sourceIdx]) nextReview[nextIdx] = true;
+      nextIdx++;
+    });
+  });
+  modeBatchFiles[currentMode] = nextFiles;
+  modeRefImages[currentMode] = nextRefs;
+  modeEndImages[currentMode] = nextEnds;
+  modeReviewFlags[currentMode] = nextReview;
+  rowRefImages = modeRefImages[currentMode];
+  endRowImages = modeEndImages[currentMode];
+  latestJobState = null;
+  activeJobMode = null;
+  syncPromptSourceUI();
+  renderBatchTable();
+  populateResultsTable();
+  clearProgressUI();
+  updateRetryUI();
+}
+
+async function runRerunSelection(filter) {
+  const subset = buildRerunSubset(filter);
+  const count = subset.reduce((sum, file) => sum + file.prompts.length, 0);
+  if (!count) {
+    sAlert(filter === "failed" ? "Không có dòng lỗi để chạy lại." : "Chưa có dòng nào được đánh dấu chưa đẹp.");
+    return;
+  }
+  const confirmed = await sConfirm(
+    filter === "failed"
+      ? `Chạy lại ${count} dòng lỗi trong batch hiện tại?`
+      : `Chạy lại ${count} dòng đã đánh dấu chưa đẹp trong batch hiện tại?`,
+    "Chạy lại"
+  );
+  if (!confirmed) return;
+  applyRerunSubset(subset, filter === "failed" ? "retry lỗi" : "retry chưa đẹp");
+  await startGeneration();
+}
+
+function rerunFailedRows() { return runRerunSelection("failed"); }
+function rerunNeedsReviewRows() { return runRerunSelection("needs_review"); }
+
+function restoreOriginalBatchAfterRerun() {
+  const snapshot = modeRerunSnapshots[currentMode];
+  if (!snapshot) return;
+  modeBatchFiles[currentMode] = JSON.parse(JSON.stringify(snapshot.batchFiles));
+  modeSourcePaths[currentMode] = { ...snapshot.sourcePaths };
+  modeRefImages[currentMode] = JSON.parse(JSON.stringify(snapshot.refImages));
+  modeEndImages[currentMode] = JSON.parse(JSON.stringify(snapshot.endImages));
+  modeReviewFlags[currentMode] = { ...snapshot.reviewFlags };
+  rowRefImages = modeRefImages[currentMode];
+  endRowImages = modeEndImages[currentMode];
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
+  activeJobMode = null;
+  syncPromptSourceUI();
+  renderBatchTable();
+  populateResultsTable();
+  clearProgressUI();
+  updateRetryUI();
+}
 
 // ── Generate ──
 async function startGeneration() {
@@ -476,6 +632,7 @@ async function startGeneration() {
   document.getElementById("runBtn").disabled = true;
   document.getElementById("stopBtn").disabled = false;
   populateResultsTable();
+  updateRetryUI();
 
   const refMap = {}, endMap = {};
   prompts.forEach((_, i) => {
@@ -552,10 +709,10 @@ async function stopGeneration() {
 
 function resetUI() {
   activeJobMode = null;
-  latestJobState = null;
   document.getElementById("runBtn").disabled = false;
   document.getElementById("stopBtn").disabled = true;
   clearProgressUI();
+  updateRetryUI();
 }
 
 function clearProgressUI() {
@@ -635,11 +792,11 @@ async function showVideoAutoDownloadGuide() {
       <p>Bật tính năng này để mỗi video hoàn thành sẽ tự tải ngay về máy.</p>
       <p style="margin-top:8px"><b>Thiết lập một lần trong Chrome:</b></p>
       <ol style="padding-left:18px">
-        <li>Bấm vào liên kết <a href="#" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống tự động</a></li>
-        <li>Dán <code>chrome://settings/content/automaticDownloads</code> vào thanh địa chỉ</li>
+        <li>Bấm vào liên kết <a href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống</a></li>
+        <li>Nếu Chrome chặn không cho website mở trang này, dán <code>chrome://settings/downloads</code> vào thanh địa chỉ</li>
         <li>Cho phép trang tải nhiều tệp tự động để hệ thống tự tải không hỏi lại</li>
       </ol>
-      <p style="margin-top:8px;color:#64748b">Sau khi bấm vào link trên, nút đóng sẽ hiện ra.</p>
+      <p style="margin-top:8px;color:#64748b">Chrome có thể chặn website mở trực tiếp trang <code>chrome://</code>. Nếu vậy, hệ thống sẽ tự copy sẵn đường dẫn để anh/chị dán nhanh.</p>
     </div>`,
     icon: "info",
     showConfirmButton: true,
@@ -653,9 +810,8 @@ async function showVideoAutoDownloadGuide() {
       const link = document.getElementById("videoAutoDlLink");
       if (link) {
         link.addEventListener("click", async ev => {
-          ev.preventDefault();
-          try { await navigator.clipboard.writeText("chrome://settings/content/automaticDownloads"); } catch (_) {}
-          link.textContent = "Đã copy link cài đặt";
+          try { await navigator.clipboard.writeText("chrome://settings/downloads"); } catch (_) {}
+          link.textContent = "Đã thử mở và copy sẵn đường dẫn";
           if (!linkClicked && confirmBtn) {
             linkClicked = true;
             confirmBtn.style.display = "inline-flex";
@@ -729,7 +885,7 @@ function populateResultsTable() {
   const hasRef = !!cfg.refLabel;
   const hasEnd = !!cfg.endLabel;
 
-  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; return; }
+  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; updateRetryUI(); return; }
   empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} dòng`;
 
   let html = "", idx = 0;
@@ -763,13 +919,18 @@ function populateResultsTable() {
         <td><div class="prompt-cell">${esc(text)}</div></td>
         ${hasRef ? `<td style="text-align:center">${refCell}</td>` : ""}
         ${hasEnd ? `<td style="text-align:center">${endCell}</td>` : ""}
-        <td class="status-cell">⏳ Chờ</td>
+        <td class="status-cell">Chờ</td>
         <td>—</td>
       </tr>`;
       idx++;
     });
   });
   tbody.innerHTML = html;
+  Object.entries(getReviewFlags()).forEach(([idx, active]) => {
+    const row = document.getElementById(`resRow${idx}`);
+    if (row) row.classList.toggle("row-review", !!active);
+  });
+  updateRetryUI();
 }
 
 function getActiveVideoSlots() {
@@ -797,11 +958,19 @@ function updateResults(job) {
     if (v.urls && v.urls.length) {
       row.className = "row-done";
       row.cells[statusCellIdx].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${modeLabel(v.mode || currentMode)}</span>`;
-      row.cells[videoCellIdx].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">Video ${i + 1}</a>`).join("");
+      const reviewActive = !!getReviewFlags()[idx];
+      row.cells[videoCellIdx].innerHTML = `
+        <div class="video-action-stack">
+          ${v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">Video ${i + 1}</a>`).join("")}
+          <button class="btn-chip ${reviewActive ? "active" : ""}" onclick="toggleNeedsReview(${idx})">
+            ${reviewActive ? "Bỏ cờ chưa đẹp" : "Đánh dấu chưa đẹp"}
+          </button>
+        </div>
+        <div class="retry-note">${reviewActive ? "Dòng này sẽ được gom vào nhóm chạy lại file chưa đẹp." : "Nếu chưa ưng ý, đánh dấu để gom vào lượt chạy lại tiếp theo."}</div>`;
     } else if (v.error) {
       row.className = "row-error";
       row.cells[statusCellIdx].innerHTML = '<span class="status-err">❌ Lỗi</span>';
-      row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
+      row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span><div class="retry-note">Dòng lỗi sẽ được gom vào nút chạy lại file lỗi.</div>`;
     }
   });
 
@@ -811,7 +980,7 @@ function updateResults(job) {
     const row = document.getElementById(`resRow${idx}`);
     if (!row || row.className === "row-done" || row.className === "row-error") continue;
     row.className = "";
-    row.cells[statusCellIdx].innerHTML = "⏳ Chờ";
+    row.cells[statusCellIdx].innerHTML = "Chờ";
     row.cells[videoCellIdx].innerHTML = "—";
   }
 
@@ -837,10 +1006,15 @@ function updateResults(job) {
     const done = videos.slice(offset, end).filter(v => !!v).length;
     if (done >= f.prompts.length) f.status = videos.slice(offset, end).every(v => v && v.urls?.length) ? "✅ Xong" : "⚠️ Có lỗi";
     else if (done > 0) f.status = `🔄 ${done}/${f.prompts.length}`;
-    else f.status = "⏳ Chờ";
+    else f.status = "Chờ";
     offset = end;
   });
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("");
+  Object.entries(getReviewFlags()).forEach(([idx, active]) => {
+    const row = document.getElementById(`resRow${idx}`);
+    if (row) row.classList.toggle("row-review", !!active);
+  });
+  updateRetryUI();
 }
 
 function modeLabel(mode) {

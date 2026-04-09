@@ -76,6 +76,15 @@ textarea { resize: vertical; }
 .btn-stop { background: #dc2626; color: #fff; font-size: 0.88rem; padding: 12px; border-radius: 12px; }
 .btn-stop:hover:not(:disabled) { background: #b91c1c; }
 .auto-download-card { padding: 12px 14px; }
+.retry-card { display:grid; gap:12px; }
+.retry-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.retry-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.retry-actions .btn:last-child { grid-column:1/-1; }
+.row-review { box-shadow: inset 3px 0 0 #f59e0b; }
+.video-action-stack { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.btn-chip { padding:5px 9px; border-radius:999px; font-size:0.72rem; border:1px solid var(--border); background:#fff; color:var(--muted); cursor:pointer; }
+.btn-chip.active { background:#fef3c7; border-color:#f59e0b; color:#92400e; }
+.retry-note { font-size:0.7rem; color:var(--muted); margin-top:6px; line-height:1.45; }
 .toggle-row { display:flex; align-items:center; justify-content:space-between; gap:16px; cursor:pointer; }
 .toggle-title { font-size:0.84rem; font-weight:700; color:var(--text); }
 .toggle-note { margin-top:4px; font-size:0.75rem; color:var(--muted); line-height:1.5; max-width:280px; }
@@ -151,6 +160,7 @@ textarea { resize: vertical; }
   .main-layout { grid-template-columns: 1fr; height: auto; }
   .left-panel, .right-panel { height: auto; }
   .app-switcher { width:100%; justify-content:center; }
+  .retry-actions { grid-template-columns:1fr; }
 }
 
 /* ── Login Screen ──────────────────────────────────────────────────────────── */
