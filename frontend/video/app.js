@@ -1,5 +1,4 @@
 const API_BASE = "https://banana-pro-api.kh431248.workers.dev";
-const VPS_BASE = "https://api.sunnshineshop.asia";
 const STORAGE_TOKEN_KEY = "bp_token";
 const STORAGE_USER_KEY = "bp_user";
 const LEGACY_TOKEN_KEYS = ["bp_token", "bp_image_token", "bp_video_token"];
@@ -10,42 +9,6 @@ function sAlert(text, icon = "info") { return Swal.fire({ text, icon, confirmBut
 function sSuccess(text) { Toast.fire({ icon: "success", title: text }); }
 async function sConfirm(text, title = "Xác nhận") { const r = await Swal.fire({ title, text, icon: "warning", showCancelButton: true, confirmButtonColor: "#16a34a", cancelButtonColor: "#6b7280", confirmButtonText: "Đồng ý", cancelButtonText: "Hủy" }); return r.isConfirmed; }
 function roleLabel(role) { return role === "super_admin" ? "Chủ hệ thống" : role === "admin" ? "Quản trị viên" : "Người dùng"; }
-const ADMIN_CONTACT_HTML = `
-  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
-    <a href="https://zalo.me/0822922996" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:14px;background:#e0f2fe;border:1px solid #7dd3fc;color:#0369a1;font-weight:700;text-decoration:none">
-      <span>Zalo</span>
-      <span>0822.922.996</span>
-    </a>
-    <a href="https://t.me/mavnhuy1" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:14px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:700;text-decoration:none">
-      <span>Telegram</span>
-      <span>@mavnhuy1</span>
-    </a>
-  </div>`;
-function planScopeLabel(scope) { return scope === "image" ? "Chỉ ảnh" : scope === "video" ? "Chỉ video" : "Ảnh + Video"; }
-function hasFeatureAccess(feature) {
-  if (!authUser) return false;
-  if (["admin", "super_admin"].includes(authUser.role)) return true;
-  const scope = authUser.plan_scope || "both";
-  return scope === "both" || scope === feature;
-}
-function showUpgradePopup(feature = "video") {
-  const targetLabel = feature === "video" ? "video" : "tạo ảnh";
-  return Swal.fire({
-    icon: "info",
-    title: `Gói hiện tại chưa mở ${targetLabel}`,
-    html: `<div style="text-align:left;font-size:0.92rem;line-height:1.7">
-      <p>Anh/chị đang dùng gói <b>${planScopeLabel(authUser?.plan_scope || "both")}</b>, nên tính năng <b>${targetLabel}</b> tạm thời chưa khả dụng.</p>
-      <p>Nếu anh/chị muốn mở thêm tính năng này, chỉ cần nhắn admin giúp em. Bên em sẽ hỗ trợ nâng cấp gói nhanh và gọn để mình dùng mượt ngay ạ.</p>
-      <div style="margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:12px 12px">
-        <div style="font-weight:700;color:#0f172a;margin-bottom:4px">Liên hệ admin để nâng cấp nhanh</div>
-        <div style="font-size:0.85rem;color:#64748b">Chọn kênh thuận tiện nhất cho anh/chị ở dưới đây.</div>
-        ${ADMIN_CONTACT_HTML}
-      </div>
-    </div>`,
-    confirmButtonColor: "#16a34a",
-    confirmButtonText: "Đã hiểu",
-  });
-}
 
 let authToken = LEGACY_TOKEN_KEYS.map(k => localStorage.getItem(k)).find(Boolean) || "";
 let authUser = null;
@@ -85,6 +48,8 @@ const savedVideoHistoryUrls = new Set();
 const autoDownloadedVideoUrls = new Set();
 let autoDownloadGuideAcknowledged = localStorage.getItem("bp_video_dl_guide") === "1";
 let autoDownloadEachEnabled = localStorage.getItem("bp_video_auto_each_download") === "1";
+const modeReviewFlags = { t2v: {}, i2v: {}, fl: {}, r2v: {} };
+const modeRerunSnapshots = { t2v: null, i2v: null, fl: null, r2v: null };
 
 const MODE_CONFIG = {
   t2v: {
@@ -159,58 +124,12 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s || 
 function getBatchFiles() { return modeBatchFiles[currentMode]; }
 function setBatchFiles(files) { modeBatchFiles[currentMode] = files; }
 function getSourcePaths() { return modeSourcePaths[currentMode]; }
+function getReviewFlags() { return modeReviewFlags[currentMode]; }
 
 function apiFetch(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
   return fetch(API_BASE + path, { ...opts, headers });
-}
-
-function vpsFetch(path, opts = {}) {
-  return fetch(VPS_BASE + path, opts);
-}
-
-function mapServerErrorMessage(message, status, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
-  const raw = String(message || "").trim();
-  if (!raw) {
-    if (status === 401) return "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại để tiếp tục.";
-    if (status === 403) return "Yêu cầu bị từ chối. Vui lòng kiểm tra quyền truy cập, gói dịch vụ hoặc cookie đang dùng.";
-    if (status === 404) return "Không tìm thấy dữ liệu hoặc tính năng mà hệ thống đang cần.";
-    if (status === 408) return "Máy chủ phản hồi quá lâu. Anh/chị vui lòng thử lại sau ít phút.";
-    if (status === 409) return "Dữ liệu đang bị trùng hoặc xung đột, vui lòng kiểm tra lại rồi thử lại.";
-    if (status === 429) return "Hệ thống đang xử lý quá nhiều yêu cầu. Anh/chị vui lòng chờ một chút rồi thử lại.";
-    if (status >= 500) return "Máy chủ đang gặp sự cố tạm thời. Anh/chị vui lòng thử lại sau ít phút.";
-    return fallback;
-  }
-  if (/^HTTP\s*\d+/i.test(raw)) return mapServerErrorMessage("", status || Number(raw.replace(/\D+/g, "")), fallback);
-  if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) return "Không thể kết nối tới máy chủ. Anh/chị vui lòng kiểm tra mạng rồi thử lại.";
-  if (/unauthorized|jwt|token|phiên đăng nhập/i.test(raw)) return "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.";
-  if (/forbidden|permission|not allowed|access denied/i.test(raw)) return "Yêu cầu bị từ chối. Tài khoản hiện chưa có quyền thực hiện thao tác này.";
-  if (/not found|không tìm thấy/i.test(raw)) return raw;
-  if (/too many requests|rate limit|429/i.test(raw)) return "Hệ thống đang bận vì có quá nhiều yêu cầu cùng lúc. Anh/chị vui lòng thử lại sau ít phút.";
-  if (/vps error|upstream|bad gateway|gateway/i.test(raw)) return `Máy chủ xử lý đang gặp lỗi kết nối: ${raw}`;
-  if (/timeout|timed out/i.test(raw)) return "Máy chủ xử lý quá lâu nên yêu cầu đã bị gián đoạn. Anh/chị vui lòng thử lại.";
-  return raw;
-}
-
-async function parseApiError(res, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
-  let payload = null;
-  let text = "";
-  try { payload = await res.clone().json(); } catch (_) {}
-  if (!payload) {
-    try { text = await res.clone().text(); } catch (_) {}
-  }
-  const message =
-    payload?.detail ||
-    payload?.error ||
-    payload?.message ||
-    payload?.msg ||
-    text;
-  return mapServerErrorMessage(message, res.status, fallback);
-}
-
-function parseCaughtError(error, fallback = "Hệ thống đang gặp lỗi, vui lòng thử lại.") {
-  return mapServerErrorMessage(error?.message || error, 0, fallback);
 }
 
 // ── Auth ──
@@ -243,6 +162,9 @@ function logout() { clearAuth(); showLogin(); }
 function switchApp(url) {
   window.location.assign(url);
 }
+function openExternalTool(url) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 let authTab = "login";
 function switchAuthTab(tab) {
   authTab = tab;
@@ -255,13 +177,13 @@ async function handleAuth(e) {
   const errEl = document.getElementById("authError"); errEl.style.display = "none";
   try {
     const res = await fetch(API_BASE + (authTab === "login" ? "/auth/login" : "/auth/register"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-    if (!res.ok) { errEl.textContent = await parseApiError(res, "Không thể đăng nhập vào hệ thống video."); errEl.style.display = "block"; return false; }
     const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || "Lỗi"; errEl.style.display = "block"; return false; }
     authToken = data.token; authUser = { username: data.username, role: data.role };
     localStorage.setItem(STORAGE_TOKEN_KEY, authToken); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
     try { const me = await apiFetch("/auth/me"); if (me.ok) { authUser = await me.json(); localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser)); } } catch(_){}
     showApp();
-  } catch (e) { errEl.textContent = parseCaughtError(e, "Không thể kết nối tới máy chủ để đăng nhập."); errEl.style.display = "block"; }
+  } catch (e) { errEl.textContent = "Lỗi kết nối"; errEl.style.display = "block"; }
   return false;
 }
 
@@ -274,6 +196,7 @@ function showTab(tab) {
   document.getElementById("navAdmin").classList.toggle("active", tab === "admin");
   if (tab === "history") loadHistory();
   if (tab === "admin" && ["admin", "super_admin"].includes(authUser?.role)) { switchAdminSection(adminSection || "overview"); }
+  updateRetryUI();
 }
 
 // ── Video Mode ──
@@ -321,6 +244,7 @@ function setMode(mode) {
     document.getElementById("runBtn").disabled = false;
     document.getElementById("stopBtn").disabled = true;
   }
+  updateRetryUI();
 }
 
 function updateModelDesc() {
@@ -404,26 +328,16 @@ function renderCookieTable() {
 }
 function parseCookieInput(raw) { try { const arr = JSON.parse(raw); if (Array.isArray(arr)) { const o = {}; arr.forEach(c => { if (c.name && c.value) o[c.name] = c.value; }); return o; } } catch(e) {} const o = {}; raw.split(";").forEach(p => { const [k,...v] = p.split("="); if (k?.trim()) o[k.trim()] = v.join("=").trim(); }); return o; }
 async function addCookie() {
-  if (!hasFeatureAccess("video")) { showUpgradePopup("video"); return; }
   const raw = document.getElementById("newCookieInput").value.trim(); if (!raw) return;
   const parsed = parseCookieInput(raw); if (!parsed || !Object.keys(parsed).length) { sAlert("Cookie không hợp lệ"); return; }
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)))).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
   const res = await apiFetch("/user/cookies", { method: "POST", body: JSON.stringify({ cookie_raw: raw, cookie_hash: hash }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể thêm cookie vào hệ thống video."), "error"); return; }
+  const data = await res.json(); if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("newCookieInput").value = ""; sSuccess("Đã thêm cookie"); loadCookiesFromDB();
 }
-async function deleteCookie(id) {
-  const res = await apiFetch(`/user/cookies/${id}`, { method: "DELETE" });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa cookie này."), "error"); return; }
-  loadCookiesFromDB();
-}
-async function clearAllCookies() {
-  if (!await sConfirm("Xóa tất cả cookie?")) return;
-  const res = await apiFetch("/user/cookies/clear", { method: "DELETE" });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa toàn bộ cookie."), "error"); return; }
-  loadCookiesFromDB();
-}
-function openCookieModal() { if (!hasFeatureAccess("video")) { showUpgradePopup("video"); return; } document.getElementById("cookieModal").style.display = "flex"; }
+async function deleteCookie(id) { await apiFetch(`/user/cookies/${id}`, { method: "DELETE" }); loadCookiesFromDB(); }
+async function clearAllCookies() { if (!await sConfirm("Xóa tất cả cookie?")) return; await apiFetch("/user/cookies/clear", { method: "DELETE" }); loadCookiesFromDB(); }
+function openCookieModal() { document.getElementById("cookieModal").style.display = "flex"; }
 function closeCookieModal() { document.getElementById("cookieModal").style.display = "none"; }
 
 // ── Prompt Sources ──
@@ -434,6 +348,9 @@ function loadTxtFile(input) {
   sourcePaths.folder = "";
   syncPromptSourceUI();
   setBatchFiles([]);
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
   const reader = new FileReader();
   reader.onload = e => {
     setBatchFiles([{ name: file.name, prompts: e.target.result.split("\n").map(s => s.trim()).filter(Boolean), status: "Chờ" }]);
@@ -449,6 +366,9 @@ function loadFolderTxt(input) {
   sourcePaths.txt = "";
   syncPromptSourceUI();
   setBatchFiles([]);
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
   let loaded = 0;
   const nextBatchFiles = [];
   files.forEach(file => {
@@ -468,9 +388,13 @@ function clearSources() {
   setBatchFiles([]);
   modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
   modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  modeReviewFlags[currentMode] = {};
+  modeRerunSnapshots[currentMode] = null;
   modeSourcePaths[currentMode] = { txt: "", folder: "" };
+  latestJobState = null;
   syncPromptSourceUI();
   renderBatchTable();
+  updateRetryUI();
 }
 function renderBatchTable() {
   const batchFiles = getBatchFiles();
@@ -534,7 +458,9 @@ function handleRefRowImport(input) {
 function clearRefAll() {
   modeRefImages[currentMode] = {}; rowRefImages = modeRefImages[currentMode];
   modeEndImages[currentMode] = {}; endRowImages = modeEndImages[currentMode];
+  modeReviewFlags[currentMode] = {};
   refreshRefCells();
+  updateRetryUI();
 }
 function removeRefImg(idx, imgIdx = null) {
   if (imgIdx !== null && Array.isArray(rowRefImages[idx])) {
@@ -545,24 +471,148 @@ function removeRefImg(idx, imgIdx = null) {
 }
 function removeEndImg(idx) { delete endRowImages[idx]; refreshRefCells(); }
 
+function countFailedRows() {
+  return (latestJobState?.videos || []).filter(v => v?.error).length;
+}
+
+function countNeedsReviewRows() {
+  return Object.values(getReviewFlags()).filter(Boolean).length;
+}
+
+function updateRetryUI() {
+  const failed = countFailedRows();
+  const needsReview = countNeedsReviewRows();
+  const rerunActive = !!modeRerunSnapshots[currentMode];
+  const summaryEl = document.getElementById("retrySummary");
+  const badgeEl = document.getElementById("retryStateBadge");
+  const failedBtn = document.getElementById("rerunFailedBtn");
+  const reviewBtn = document.getElementById("rerunNeedsReviewBtn");
+  const restoreBtn = document.getElementById("restoreBatchBtn");
+  if (!summaryEl || !badgeEl || !failedBtn || !reviewBtn || !restoreBtn) return;
+  summaryEl.textContent = rerunActive
+    ? `Đang mở danh sách rerun rút gọn. Lỗi: ${failed} dòng, chưa đẹp: ${needsReview} dòng.`
+    : `Hiện có ${failed} dòng lỗi và ${needsReview} dòng đã đánh dấu chưa đẹp trong batch hiện tại.`;
+  badgeEl.className = `badge ${rerunActive ? "badge-running" : (failed || needsReview ? "badge-done" : "badge-pending")}`;
+  badgeEl.textContent = rerunActive ? "Rerun" : (failed || needsReview ? "Sẵn sàng" : "Chờ");
+  failedBtn.disabled = !!currentJobId || failed === 0;
+  reviewBtn.disabled = !!currentJobId || needsReview === 0;
+  restoreBtn.disabled = !!currentJobId || !rerunActive;
+}
+
+function toggleNeedsReview(idx) {
+  const flags = getReviewFlags();
+  flags[idx] = !flags[idx];
+  if (!flags[idx]) delete flags[idx];
+  const row = document.getElementById(`resRow${idx}`);
+  if (row) row.classList.toggle("row-review", !!flags[idx]);
+  updateResults(latestJobState || { videos: [] });
+  updateRetryUI();
+}
+
+function buildRerunSubset(filter) {
+  const batchFiles = getBatchFiles();
+  const reviewFlags = getReviewFlags();
+  const videoResults = latestJobState?.videos || [];
+  const selected = [];
+  let globalIdx = 0;
+  batchFiles.forEach(file => {
+    const prompts = [];
+    file.prompts.forEach(prompt => {
+      const picked = filter === "failed" ? !!videoResults[globalIdx]?.error : !!reviewFlags[globalIdx];
+      if (picked) prompts.push({ prompt, sourceIdx: globalIdx });
+      globalIdx++;
+    });
+    if (prompts.length) selected.push({ name: file.name, prompts });
+  });
+  return selected;
+}
+
+function snapshotCurrentBatchForRerun() {
+  if (modeRerunSnapshots[currentMode]) return;
+  modeRerunSnapshots[currentMode] = {
+    batchFiles: JSON.parse(JSON.stringify(getBatchFiles())),
+    sourcePaths: { ...getSourcePaths() },
+    refImages: JSON.parse(JSON.stringify(modeRefImages[currentMode] || {})),
+    endImages: JSON.parse(JSON.stringify(modeEndImages[currentMode] || {})),
+    reviewFlags: { ...(modeReviewFlags[currentMode] || {}) },
+  };
+}
+
+function applyRerunSubset(subset, label) {
+  snapshotCurrentBatchForRerun();
+  const nextFiles = [];
+  const nextRefs = {};
+  const nextEnds = {};
+  const nextReview = {};
+  let nextIdx = 0;
+  subset.forEach(file => {
+    nextFiles.push({ name: `${file.name} • ${label}`, prompts: file.prompts.map(item => item.prompt), status: "Chờ" });
+    file.prompts.forEach(item => {
+      if (modeRefImages[currentMode]?.[item.sourceIdx] !== undefined) nextRefs[nextIdx] = JSON.parse(JSON.stringify(modeRefImages[currentMode][item.sourceIdx]));
+      if (modeEndImages[currentMode]?.[item.sourceIdx] !== undefined) nextEnds[nextIdx] = JSON.parse(JSON.stringify(modeEndImages[currentMode][item.sourceIdx]));
+      if (modeReviewFlags[currentMode]?.[item.sourceIdx]) nextReview[nextIdx] = true;
+      nextIdx++;
+    });
+  });
+  modeBatchFiles[currentMode] = nextFiles;
+  modeRefImages[currentMode] = nextRefs;
+  modeEndImages[currentMode] = nextEnds;
+  modeReviewFlags[currentMode] = nextReview;
+  rowRefImages = modeRefImages[currentMode];
+  endRowImages = modeEndImages[currentMode];
+  latestJobState = null;
+  activeJobMode = null;
+  syncPromptSourceUI();
+  renderBatchTable();
+  populateResultsTable();
+  clearProgressUI();
+  updateRetryUI();
+}
+
+async function runRerunSelection(filter) {
+  const subset = buildRerunSubset(filter);
+  const count = subset.reduce((sum, file) => sum + file.prompts.length, 0);
+  if (!count) {
+    sAlert(filter === "failed" ? "Không có dòng lỗi để chạy lại." : "Chưa có dòng nào được đánh dấu chưa đẹp.");
+    return;
+  }
+  const confirmed = await sConfirm(
+    filter === "failed"
+      ? `Chạy lại ${count} dòng lỗi trong batch hiện tại?`
+      : `Chạy lại ${count} dòng đã đánh dấu chưa đẹp trong batch hiện tại?`,
+    "Chạy lại"
+  );
+  if (!confirmed) return;
+  applyRerunSubset(subset, filter === "failed" ? "retry lỗi" : "retry chưa đẹp");
+  await startGeneration();
+}
+
+function rerunFailedRows() { return runRerunSelection("failed"); }
+function rerunNeedsReviewRows() { return runRerunSelection("needs_review"); }
+
+function restoreOriginalBatchAfterRerun() {
+  const snapshot = modeRerunSnapshots[currentMode];
+  if (!snapshot) return;
+  modeBatchFiles[currentMode] = JSON.parse(JSON.stringify(snapshot.batchFiles));
+  modeSourcePaths[currentMode] = { ...snapshot.sourcePaths };
+  modeRefImages[currentMode] = JSON.parse(JSON.stringify(snapshot.refImages));
+  modeEndImages[currentMode] = JSON.parse(JSON.stringify(snapshot.endImages));
+  modeReviewFlags[currentMode] = { ...snapshot.reviewFlags };
+  rowRefImages = modeRefImages[currentMode];
+  endRowImages = modeEndImages[currentMode];
+  modeRerunSnapshots[currentMode] = null;
+  latestJobState = null;
+  activeJobMode = null;
+  syncPromptSourceUI();
+  renderBatchTable();
+  populateResultsTable();
+  clearProgressUI();
+  updateRetryUI();
+}
+
 // ── Generate ──
 async function startGeneration() {
-  if (!hasFeatureAccess("video")) { showUpgradePopup("video"); return; }
   if (!cookies.length) { sAlert("Vui lòng thêm cookie."); return; }
-
-  const oldest = cookies.reduce((min, c) => {
-    const t = c.created_at ? new Date(c.created_at + "Z").getTime() : 0;
-    return t && t < min ? t : min;
-  }, Date.now());
-  const hoursAgo = Math.floor((Date.now() - oldest) / 3600000);
-  if (hoursAgo >= 10) {
-    const ok = await sConfirm(
-      `Cookie đã được thêm ${hoursAgo} giờ trước.\nCookie chỉ có hạn 10-24 giờ, có thể đã hết hạn.\nBạn nên lấy cookie mới trước khi tạo video.`,
-      "Cookie có thể hết hạn"
-    );
-    if (!ok) return;
-  }
-
   const prompts = getBatchFiles().flatMap(f => f.prompts);
   if (!prompts.length) { sAlert("Chọn file .txt có prompts."); return; }
 
@@ -585,6 +635,7 @@ async function startGeneration() {
   document.getElementById("runBtn").disabled = true;
   document.getElementById("stopBtn").disabled = false;
   populateResultsTable();
+  updateRetryUI();
 
   const refMap = {}, endMap = {};
   prompts.forEach((_, i) => {
@@ -601,22 +652,17 @@ async function startGeneration() {
   try {
     savedVideoHistoryUrls.clear();
     autoDownloadedVideoUrls.clear();
-    const ctxRes = await apiFetch("/user/generate-context?feature=video");
-    if (!ctxRes.ok) throw new Error(await parseApiError(ctxRes, "Không thể lấy cấu hình chạy từ máy chủ."));
-    const ctx = await ctxRes.json();
-
     const body = { mode: currentMode, model, num_videos, prompts, ref_images: refMap, end_images: endMap,
-                   cookie: ctx.cookie, cookie_pool: ctx.cookie_pool || [],
                    delay: parseInt(document.getElementById("delayInput").value) || 3 };
-    const res = await vpsFetch("/generate-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(await parseApiError(res, "Không thể gửi yêu cầu tạo video lên máy chủ."));
+    const res = await apiFetch("/generate-video", { method: "POST", body: JSON.stringify(body) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.detail || e?.error || `HTTP ${res.status}`); }
     const job = await res.json();
     currentJobId = job.job_id;
     activeJobMode = currentMode;
     latestJobState = job;
     startPolling();
   } catch (e) {
-    sAlert(parseCaughtError(e, "Không thể bắt đầu tác vụ tạo video."), "error");
+    sAlert("Lỗi: " + e.message, "error");
     document.getElementById("runBtn").disabled = false;
     document.getElementById("stopBtn").disabled = true;
     document.getElementById("progressCard").style.display = "none";
@@ -629,16 +675,8 @@ function startPolling() {
   pollInterval = setInterval(async () => {
     if (!currentJobId) return;
     try {
-      const res = await vpsFetch(`/video-jobs/${currentJobId}`);
-      if (!res.ok) {
-        if (++pollFailCount >= 5) {
-          clearInterval(pollInterval);
-          currentJobId = null;
-          sAlert(await parseApiError(res, "Mất kết nối tới máy chủ trong lúc đang lấy tiến độ tạo video."), "error");
-          resetUI();
-        }
-        return;
-      }
+      const res = await apiFetch(`/video-jobs/${currentJobId}`);
+      if (!res.ok) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối server", "error"); resetUI(); } return; }
       pollFailCount = 0;
       const job = await res.json();
       latestJobState = job;
@@ -658,33 +696,26 @@ function startPolling() {
         persistVideoHistoryIncrementally(job, finishedJobId, finishedMode).catch(() => {});
         if (autoDownloadEachEnabled) autoDownloadFinishedVideos(job).catch(() => {});
         currentJobId = null; resetUI();
-        if (job.status === "error") sAlert(mapServerErrorMessage(job.error, 500, "Máy chủ trả về lỗi khi đang tạo video."), "error");
+        if (job.status === "error") sAlert(job.error || "Lỗi", "error");
         else sSuccess(`Hoàn thành ${job.completed} prompt!`);
       }
-    } catch (e) {
-      if (++pollFailCount >= 5) {
-        clearInterval(pollInterval);
-        currentJobId = null;
-        sAlert(parseCaughtError(e, "Mất kết nối tới máy chủ trong lúc đang lấy tiến độ tạo video."), "error");
-        resetUI();
-      }
-    }
+    } catch (e) { if (++pollFailCount >= 5) { clearInterval(pollInterval); currentJobId = null; sAlert("Mất kết nối", "error"); resetUI(); } }
   }, 3000);
 }
 
 async function stopGeneration() {
   if (!currentJobId) return;
   clearInterval(pollInterval);
-  await vpsFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
+  await apiFetch(`/jobs/${currentJobId}`, { method: "DELETE" }).catch(() => {});
   currentJobId = null; resetUI();
 }
 
 function resetUI() {
   activeJobMode = null;
-  latestJobState = null;
   document.getElementById("runBtn").disabled = false;
   document.getElementById("stopBtn").disabled = true;
   clearProgressUI();
+  updateRetryUI();
 }
 
 function clearProgressUI() {
@@ -757,43 +788,136 @@ function buildVideoFilename(url, index) {
 }
 
 async function showVideoAutoDownloadGuide() {
-  let linkClicked = false;
-  await Swal.fire({
-    title: "Tự động tải video",
-    html: `<div style="text-align:left;font-size:0.88rem;line-height:1.65">
-      <p>Bật tính năng này để mỗi video hoàn thành sẽ tự tải ngay về máy.</p>
-      <p style="margin-top:8px"><b>Thiết lập một lần trong Chrome:</b></p>
-      <ol style="padding-left:18px">
-        <li>Bấm vào liên kết <a href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="videoAutoDlLink" style="color:#0369a1;font-weight:700">mở cài đặt tải xuống</a></li>
-        <li>Nếu Chrome chặn không cho website mở trang này, dán <code>chrome://settings/downloads</code> vào thanh địa chỉ</li>
-        <li>Cho phép trang tải nhiều tệp tự động để hệ thống tự tải không hỏi lại</li>
+  await openDetailedGuide("downloads");
+  autoDownloadGuideAcknowledged = true;
+  localStorage.setItem("bp_video_dl_guide", "1");
+}
+
+function buildGuideTabButton(id, label, activeId) {
+  return `<button type="button" class="guide-tab-btn${id === activeId ? " active" : ""}" data-guide-tab="${id}">${label}</button>`;
+}
+
+function buildGuidePanel(id, title, body, activeId) {
+  return `<section class="guide-panel${id === activeId ? " active" : ""}" data-guide-panel="${id}">
+    <h3>${title}</h3>
+    ${body}
+  </section>`;
+}
+
+async function openDetailedGuide(initialTab = "overview") {
+  const tabs = [
+    { id: "overview", label: "Dùng app" },
+    { id: "downloads", label: "Tải xuống" },
+    { id: "multi", label: "Nhiều tệp" },
+    { id: "cookie", label: "Cookie" },
+    { id: "tips", label: "Mẹo nhanh" },
+  ];
+  const panels = {
+    overview: `
+      <p>Banana Pro Video hỗ trợ 4 mode chính: <b>T2V</b>, <b>I2V</b>, <b>FL</b> và <b>R2V</b>. Bạn chỉ cần chọn mode, nạp file <code>.txt</code> hoặc cả thư mục <code>.txt</code>, rồi bấm <b>Tạo video</b>.</p>
+      <ol>
+        <li>Đăng nhập và kiểm tra gói đang hoạt động ở góc phải trên cùng.</li>
+        <li>Chọn mode tạo video phù hợp với nhu cầu.</li>
+        <li>Nạp một file <code>.txt</code> hoặc cả thư mục chứa nhiều file <code>.txt</code>.</li>
+        <li>Nếu mode cần ảnh đầu vào hoặc ảnh kết thúc, thêm ảnh ngay trong bảng kết quả bên phải.</li>
+        <li>Bấm <b>Tạo video</b>, theo dõi tiến trình, rồi dùng khu vực <b>Chạy lại thông minh</b> nếu có dòng lỗi hoặc video chưa ưng ý.</li>
       </ol>
-      <p style="margin-top:8px;color:#64748b">Chrome có thể chặn website mở trực tiếp trang <code>chrome://</code>. Nếu vậy, hệ thống sẽ tự copy sẵn đường dẫn để anh/chị dán nhanh.</p>
-    </div>`,
-    icon: "info",
+      <div class="guide-note-box">Mẹo: nếu bạn đang làm nhiều bộ prompt, nên chia theo từng file <code>.txt</code> nhỏ để tiện chạy lại file lỗi hoặc file chưa đẹp sau này.</div>
+    `,
+    downloads: `
+      <p>Phần tải xuống cần cài một lần trên Chrome. Sau khi bật đúng, app có thể tự tải file về mà không hỏi lại liên tục.</p>
+      <ol>
+        <li>Mở cài đặt tải xuống của Chrome.</li>
+        <li>Chọn thư mục tải về mặc định mà bạn muốn lưu tất cả video.</li>
+        <li>Tắt lựa chọn hỏi vị trí lưu trước khi tải nếu bạn muốn tải thẳng về một thư mục cố định.</li>
+        <li>Quay lại app và bật công tắc <b>Tự tải từng video khi xong</b>.</li>
+      </ol>
+      <div class="guide-code">chrome://settings/downloads</div>
+      <div class="guide-actions">
+        <a class="guide-link-btn" href="chrome://settings/downloads" target="_blank" rel="noopener noreferrer" id="guideDownloadsLink">Mở cài đặt tải xuống</a>
+        <button type="button" class="btn btn-outline" id="copyDownloadsPathBtn">Copy đường dẫn cài đặt</button>
+      </div>
+      <div class="guide-note-box">Nếu Chrome không cho web mở trực tiếp trang <code>chrome://</code>, chỉ cần copy dòng trên rồi dán vào thanh địa chỉ Chrome là được.</div>
+    `,
+    multi: `
+      <p>Để tải nhiều tệp liên tiếp mà không bị hỏi từng lần, bạn cần cho phép website tải nhiều tệp tự động.</p>
+      <ol>
+        <li>Khi Chrome hiện popup hỏi cho phép tải nhiều file, chọn <b>Cho phép</b>.</li>
+        <li>Nếu trước đó lỡ bấm chặn, mở biểu tượng ổ khóa ở thanh địa chỉ rồi cho phép <b>Automatic downloads</b>.</li>
+        <li>Giữ công tắc <b>Tự tải từng video khi xong</b> ở trạng thái bật.</li>
+        <li>Không nên bật chế độ hỏi vị trí lưu từng file nếu muốn chạy batch lớn.</li>
+      </ol>
+      <p>Với batch nhiều prompt, app sẽ tự tải từng video khi hoàn tất. Nếu trình duyệt vẫn hỏi, đó là do quyền tải tự động của site chưa được bật đủ.</p>
+      <div class="guide-note-box">Khuyến nghị: dùng một thư mục riêng cho Banana Pro Video, ví dụ <code>D:\\BananaPro\\downloads</code> hoặc <code>Downloads/BananaProVideo</code>, để dễ quản lý batch.</div>
+    `,
+    cookie: `
+      <p>Để app lấy token hoạt động ổn định, bạn cần nhập cookie phiên Google Labs còn sống. Cách nhanh nhất là lấy cookie sau khi đăng nhập sẵn vào <b>labs.google</b>.</p>
+      <ol>
+        <li>Đăng nhập tài khoản Google dùng cho Labs trong Chrome thật.</li>
+        <li>Mở trang <code>https://labs.google/fx/tools/flow</code>.</li>
+        <li>Dùng extension xuất cookie hoặc mở DevTools để lấy cookie của domain liên quan.</li>
+        <li>Quay lại app, vào <b>Kho cookie</b>, thêm cookie đúng tài khoản tương ứng.</li>
+        <li>Kiểm tra lại trạng thái cookie trong kho trước khi chạy batch lớn.</li>
+      </ol>
+      <div class="guide-note-box">Cookie tốt là cookie còn phiên đăng nhập, mở được Labs, và không bị Google đánh dấu hoạt động bất thường. Nếu 403 nhiều, nên đổi profile hoặc cookie khác sạch hơn.</div>
+    `,
+    tips: `
+      <p>Một vài mẹo để dùng app mượt hơn khi chạy nhiều batch:</p>
+      <ul>
+        <li>Dùng thư mục <code>.txt</code> để chạy nhiều file một lần, thay vì nhét mọi prompt vào một file khổng lồ.</li>
+        <li>Dùng <b>Chạy lại file lỗi</b> khi có prompt fail; dùng <b>Chạy lại file chưa đẹp</b> sau khi đánh dấu các video chưa ưng.</li>
+        <li>Nếu tải không tự động, kiểm tra lại quyền <b>Automatic downloads</b> và cài đặt thư mục tải về.</li>
+        <li>Nếu cookie đang chạy ổn, hạn chế đăng nhập ra vào liên tục trên cùng profile.</li>
+        <li>Nút <b>ElevenLabs</b> trên đầu trang sẽ mở sang công cụ voice ở tab mới, không làm mất tiến trình hiện tại.</li>
+      </ul>
+      <div class="guide-note-box">Khi hỗ trợ người dùng mới, cứ bảo họ mở <b>Hướng dẫn chi tiết</b> trước. Popup này gom đủ các bước cài tải về, cookie và cách dùng app nên đỡ phải giải thích lại nhiều lần.</div>
+    `,
+  };
+
+  await Swal.fire({
+    title: "Hướng dẫn chi tiết",
+    width: "min(1080px, 96vw)",
     showConfirmButton: true,
-    confirmButtonText: "Đã mở cài đặt",
+    confirmButtonText: "Đã hiểu",
     confirmButtonColor: "#16a34a",
-    allowOutsideClick: false,
-    allowEscapeKey: false,
+    customClass: { popup: "guide-popup" },
+    html: `<div class="guide-shell">
+      <div class="guide-tabs">
+        ${tabs.map(tab => buildGuideTabButton(tab.id, tab.label, initialTab)).join("")}
+      </div>
+      <div class="guide-panel-wrap">
+        ${tabs.map(tab => buildGuidePanel(tab.id, tab.label, panels[tab.id], initialTab)).join("")}
+      </div>
+    </div>`,
     didOpen: () => {
-      const confirmBtn = Swal.getConfirmButton();
-      if (confirmBtn) confirmBtn.style.display = "none";
-      const link = document.getElementById("videoAutoDlLink");
-      if (link) {
-        link.addEventListener("click", async ev => {
-          try { await navigator.clipboard.writeText("chrome://settings/downloads"); } catch (_) {}
-          link.textContent = "Đã thử mở và copy sẵn đường dẫn";
-          if (!linkClicked && confirmBtn) {
-            linkClicked = true;
-            confirmBtn.style.display = "inline-flex";
+      const activateTab = (tabId) => {
+        document.querySelectorAll("[data-guide-tab]").forEach(btn => btn.classList.toggle("active", btn.getAttribute("data-guide-tab") === tabId));
+        document.querySelectorAll("[data-guide-panel]").forEach(panel => panel.classList.toggle("active", panel.getAttribute("data-guide-panel") === tabId));
+      };
+      document.querySelectorAll("[data-guide-tab]").forEach(btn => {
+        btn.addEventListener("click", () => activateTab(btn.getAttribute("data-guide-tab")));
+      });
+      const copyBtn = document.getElementById("copyDownloadsPathBtn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText("chrome://settings/downloads");
+            copyBtn.textContent = "Đã copy";
+          } catch (_) {
+            copyBtn.textContent = "Copy thủ công";
           }
         });
       }
-    }
+      const downloadsLink = document.getElementById("guideDownloadsLink");
+      if (downloadsLink) {
+        downloadsLink.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText("chrome://settings/downloads");
+          } catch (_) {}
+        });
+      }
+    },
   });
-  autoDownloadGuideAcknowledged = true;
-  localStorage.setItem("bp_video_dl_guide", "1");
 }
 
 async function toggleAutoDownloadEach(enabled) {
@@ -847,13 +971,6 @@ function updateProgress(job) {
   if (sb) { sb.className = `badge badge-${job.status}`; sb.textContent = labels[job.status] || job.status; }
 }
 
-function renderRunningStatus(label = "Đang tạo") {
-  return `<div class="status-progress">
-    <span class="status-progress-label">${esc(label)}</span>
-    <span class="status-progress-track"><span class="status-progress-bar"></span></span>
-  </div>`;
-}
-
 function populateResultsTable() {
   const batchFiles = getBatchFiles();
   const allPrompts = batchFiles.flatMap(f => f.prompts);
@@ -864,7 +981,7 @@ function populateResultsTable() {
   const hasRef = !!cfg.refLabel;
   const hasEnd = !!cfg.endLabel;
 
-  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; return; }
+  if (!allPrompts.length) { tbody.innerHTML = ""; empty.style.display = ""; badge.style.display = "none"; updateRetryUI(); return; }
   empty.style.display = "none"; badge.style.display = ""; badge.textContent = `${allPrompts.length} dòng`;
 
   let html = "", idx = 0;
@@ -905,6 +1022,11 @@ function populateResultsTable() {
     });
   });
   tbody.innerHTML = html;
+  Object.entries(getReviewFlags()).forEach(([idx, active]) => {
+    const row = document.getElementById(`resRow${idx}`);
+    if (row) row.classList.toggle("row-review", !!active);
+  });
+  updateRetryUI();
 }
 
 function getActiveVideoSlots() {
@@ -932,11 +1054,19 @@ function updateResults(job) {
     if (v.urls && v.urls.length) {
       row.className = "row-done";
       row.cells[statusCellIdx].innerHTML = `<span class="status-ok">✅ Xong</span><br><span style="font-size:0.68rem;color:var(--muted)">${modeLabel(v.mode || currentMode)}</span>`;
-      row.cells[videoCellIdx].innerHTML = v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">Video ${i + 1}</a>`).join("");
+      const reviewActive = !!getReviewFlags()[idx];
+      row.cells[videoCellIdx].innerHTML = `
+        <div class="video-action-stack">
+          ${v.urls.map((u, i) => `<a href="${u}" target="_blank" class="btn btn-green btn-sm" style="margin:2px">Video ${i + 1}</a>`).join("")}
+          <button class="btn-chip ${reviewActive ? "active" : ""}" onclick="toggleNeedsReview(${idx})">
+            ${reviewActive ? "Bỏ cờ chưa đẹp" : "Đánh dấu chưa đẹp"}
+          </button>
+        </div>
+        <div class="retry-note">${reviewActive ? "Dòng này sẽ được gom vào nhóm chạy lại file chưa đẹp." : "Nếu chưa ưng ý, đánh dấu để gom vào lượt chạy lại tiếp theo."}</div>`;
     } else if (v.error) {
       row.className = "row-error";
       row.cells[statusCellIdx].innerHTML = '<span class="status-err">❌ Lỗi</span>';
-      row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span>`;
+      row.cells[videoCellIdx].innerHTML = `<span style="font-size:0.7rem;color:var(--error)">${esc(v.error)}</span><div class="retry-note">Dòng lỗi sẽ được gom vào nút chạy lại file lỗi.</div>`;
     }
   });
 
@@ -961,7 +1091,7 @@ function updateResults(job) {
       const row = document.getElementById(`resRow${idx}`);
       if (!row || row.className === "row-done" || row.className === "row-error") return;
       row.className = "row-running";
-      row.cells[statusCellIdx].innerHTML = renderRunningStatus("Đang tạo");
+      row.cells[statusCellIdx].innerHTML = '<span style="color:#1d4ed8;font-weight:600">🔄 Đang tạo...</span>';
       if (pos === 0) row.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
@@ -976,6 +1106,11 @@ function updateResults(job) {
     offset = end;
   });
   document.getElementById("batchTableBody").innerHTML = batchFiles.map((f, i) => `<tr><td>${i + 1}</td><td>${esc(f.name)}</td><td>${f.prompts.length}</td><td>${f.status}</td></tr>`).join("");
+  Object.entries(getReviewFlags()).forEach(([idx, active]) => {
+    const row = document.getElementById(`resRow${idx}`);
+    if (row) row.classList.toggle("row-review", !!active);
+  });
+  updateRetryUI();
 }
 
 function modeLabel(mode) {
@@ -1023,14 +1158,14 @@ async function fetchHistoryPage() {
   try {
     if (historyView === "folders") {
       const res = await apiFetch(`/user/history/groups?media_type=video&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`);
-      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải danh sách thư mục lịch sử video."));
+      if (!res.ok) throw new Error();
       const groups = await res.json();
       renderHistoryFolders(groups, grid, "📁", g => g.batch_name || g.job_id, g => `${g.model || ""} · ${g.count} video`, g => openHistoryJob(g.job_id, g.batch_name || g.job_id), g => deleteHistoryJob(g.job_id));
       prevBtn.disabled = historyPage === 0;
       nextBtn.disabled = groups.length < HISTORY_LIMIT;
     } else if (historyView === "files") {
       const res = await apiFetch(`/user/history/subgroups?media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}`);
-      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải danh sách file trong lịch sử video."));
+      if (!res.ok) throw new Error();
       const subs = await res.json();
       if (subs.length <= 1) {
         historyView = "videos";
@@ -1044,7 +1179,7 @@ async function fetchHistoryPage() {
     } else {
       const qs = `media_type=video&job_id=${encodeURIComponent(historyCurrentJob)}&file_name=${encodeURIComponent(historyCurrentFile || "")}&limit=${HISTORY_LIMIT}&offset=${historyPage * HISTORY_LIMIT}`;
       const res = await apiFetch(`/user/history?${qs}`);
-      if (!res.ok) throw new Error(await parseApiError(res, "Không thể tải video trong lịch sử."));
+      if (!res.ok) throw new Error();
       const items = await res.json();
       renderVideoHistoryGrid(items, grid);
       prevBtn.disabled = historyPage === 0;
@@ -1052,7 +1187,7 @@ async function fetchHistoryPage() {
     }
     pageInfo.textContent = `Trang ${historyPage + 1}`;
   } catch (e) {
-    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📜</div><div>${esc(parseCaughtError(e, "Không thể tải lịch sử video lúc này."))}</div></div>`;
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div>Lỗi tải lịch sử</div></div>';
   } finally {
     historyLoading = false;
   }
@@ -1247,13 +1382,6 @@ async function loadAdminUsers() {
     tbody.innerHTML = users.map(u => {
       const planActive = ["admin", "super_admin"].includes(u.role) || (u.plan_expires_at && u.plan_expires_at > now);
       const planText = ["admin", "super_admin"].includes(u.role) ? "Không giới hạn" : u.plan_expires_at ? new Date(u.plan_expires_at).toLocaleDateString("vi-VN") : "Chưa có";
-      const planScopeControl = ["admin", "super_admin"].includes(authUser?.role)
-        ? `<select onchange="adminSetPlanScope(${u.id}, this.value)">
-            <option value="image" ${u.plan_scope === "image" ? "selected" : ""}>Chỉ ảnh</option>
-            <option value="video" ${u.plan_scope === "video" ? "selected" : ""}>Chỉ video</option>
-            <option value="both" ${(u.plan_scope || "both") === "both" ? "selected" : ""}>Ảnh + Video</option>
-          </select>`
-        : `<span>${planScopeLabel(u.plan_scope || "both")}</span>`;
       const planClass = planActive ? "status-ok" : "status-err";
       const quotaControl = ["admin", "super_admin"].includes(authUser?.role)
         ? `<input type="number" min="1" max="50" value="${u.cookie_quota ?? 5}" onchange="adminSetCookieQuota(${u.id}, this.value)" style="width:84px"/>`
@@ -1266,7 +1394,7 @@ async function loadAdminUsers() {
         <option value="super_admin" ${u.role === "super_admin" ? "selected" : ""}>Chủ hệ thống</option>
       </select></td>
       <td>${quotaControl}</td>
-      <td>${planScopeControl}<div style="margin-top:6px"><span class="${planClass}">${planText}</span></div>
+      <td><span class="${planClass}">${planText}</span>
         ${!["admin", "super_admin"].includes(u.role) ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},7)">+7d</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:0.68rem" onclick="adminSetPlan(${u.id},30)">+30d</button>
@@ -1276,7 +1404,7 @@ async function loadAdminUsers() {
       </td>
       <td>${u.disabled ? '<span class="status-err">Đã khóa</span>' : '<span class="status-ok">Hoạt động</span>'}</td>
       <td>
-        <button class="btn btn-ghost" onclick="adminEditUser(${u.id},'${esc(u.username)}',${u.cookie_quota ?? 5},'${esc(u.plan_scope || "both")}')">Sửa</button>
+        <button class="btn btn-ghost" onclick="adminEditUser(${u.id},'${esc(u.username)}',${u.cookie_quota ?? 5})">Sửa</button>
         <button class="btn btn-ghost" onclick="adminToggleUser(${u.id},${u.disabled ? 0 : 1})">${u.disabled ? "Mở khóa" : "Khóa"}</button>
         ${u.username !== "adminveo" ? `<button class="btn btn-red btn-sm" onclick="adminDelUser(${u.id})">Xóa</button>` : ""}
       </td>
@@ -1291,11 +1419,6 @@ async function loadAdminUsers() {
           <td>${u.id}</td>
           <td>${esc(u.username)}</td>
           <td>${roleLabel(u.role)}</td>
-          <td><select onchange="adminSetPlanScope(${u.id}, this.value)">
-            <option value="image" ${u.plan_scope === "image" ? "selected" : ""}>Chỉ ảnh</option>
-            <option value="video" ${u.plan_scope === "video" ? "selected" : ""}>Chỉ video</option>
-            <option value="both" ${(u.plan_scope || "both") === "both" ? "selected" : ""}>Ảnh + Video</option>
-          </select></td>
           <td><span class="${planActive ? "status-ok" : "status-err"}">${planText}</span></td>
           <td>
             ${!["admin", "super_admin"].includes(u.role) ? `
@@ -1340,35 +1463,21 @@ async function adminAddUser() {
   const username = document.getElementById("adminNewUser").value.trim();
   const password = document.getElementById("adminNewPass").value;
   const role = document.getElementById("adminNewRole").value;
-  const planScope = document.getElementById("adminNewPlanScope").value;
   const cookieQuota = parseInt(document.getElementById("adminNewCookieQuota")?.value || "5") || 5;
   if (!username || !password) { sAlert("Thiếu username/password"); return; }
-  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota, plan_scope: planScope }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể tạo tài khoản mới."), "error"); return; }
+  const res = await apiFetch("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role, cookie_quota: cookieQuota }) });
+  const data = await res.json();
+  if (!res.ok) { sAlert(data.error || "Lỗi"); return; }
   document.getElementById("adminNewUser").value = "";
   document.getElementById("adminNewPass").value = "";
-  if (document.getElementById("adminNewPlanScope")) document.getElementById("adminNewPlanScope").value = "both";
   if (document.getElementById("adminNewCookieQuota")) document.getElementById("adminNewCookieQuota").value = "5";
   loadAdminUsers();
 }
 
-async function adminChangeRole(id, role) {
-  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật vai trò người dùng."), "error"); return; }
-  loadAdminUsers();
-}
-async function adminToggleUser(id, disabled) {
-  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể thay đổi trạng thái tài khoản."), "error"); return; }
-  loadAdminUsers();
-}
-async function adminDelUser(id) {
-  if (!await sConfirm("Xóa user này?")) return;
-  const res = await apiFetch(`/admin/users/${id}`, { method: "DELETE" });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa người dùng này."), "error"); return; }
-  loadAdminUsers();
-}
-async function adminEditUser(id, username, cookieQuota, planScope = "both") {
+async function adminChangeRole(id, role) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ role }) }); loadAdminUsers(); }
+async function adminToggleUser(id, disabled) { await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ disabled }) }); loadAdminUsers(); }
+async function adminDelUser(id) { if (!await sConfirm("Xóa user này?")) return; await apiFetch(`/admin/users/${id}`, { method: "DELETE" }); loadAdminUsers(); }
+async function adminEditUser(id, username, cookieQuota) {
   const canEditQuota = ["admin", "super_admin"].includes(authUser?.role);
   const result = await Swal.fire({
     title: "Sửa người dùng",
@@ -1386,14 +1495,6 @@ async function adminEditUser(id, username, cookieQuota, planScope = "both") {
           <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Giới hạn cookie</label>
           <input id="swalAdminCookieQuota" type="number" min="1" max="50" class="swal2-input" value="${cookieQuota || 5}" style="margin:0;width:100%" />
         </div>` : ""}
-        <div>
-          <label style="display:block;margin-bottom:6px;font-size:0.82rem;font-weight:600">Loại gói</label>
-          <select id="swalAdminPlanScope" class="swal2-input" style="margin:0;width:100%">
-            <option value="image" ${planScope === "image" ? "selected" : ""}>Chỉ ảnh</option>
-            <option value="video" ${planScope === "video" ? "selected" : ""}>Chỉ video</option>
-            <option value="both" ${planScope === "both" ? "selected" : ""}>Ảnh + Video</option>
-          </select>
-        </div>
       </div>`,
     focusConfirm: false,
     showCancelButton: true,
@@ -1408,34 +1509,26 @@ async function adminEditUser(id, username, cookieQuota, planScope = "both") {
         Swal.showValidationMessage("Tên đăng nhập không được để trống");
         return false;
       }
-      return { username: nextUsername, password: nextPassword, cookie_quota: nextQuota, plan_scope: document.getElementById("swalAdminPlanScope").value };
+      return { username: nextUsername, password: nextPassword, cookie_quota: nextQuota };
     }
   });
   if (!result.isConfirmed) return;
   const payload = { username: result.value.username };
   if (result.value.password) payload.password = result.value.password;
   if (canEditQuota) payload.cookie_quota = result.value.cookie_quota;
-  payload.plan_scope = result.value.plan_scope;
   const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(payload) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật thông tin người dùng."), "error"); return; }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { sAlert(data.error || "Không thể cập nhật user"); return; }
   loadAdminUsers();
 }
 async function adminSetPlan(id, days) {
   if (days === 0 && !await sConfirm("Hủy gói user này?")) return;
-  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật thời hạn gói."), "error"); return; }
-  loadAdminUsers();
-}
-
-async function adminSetPlanScope(id, planScope) {
-  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_scope: planScope }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật loại gói."), "error"); return; }
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ plan_days: days }) });
   loadAdminUsers();
 }
 
 async function adminSetCookieQuota(id, quota) {
-  const res = await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ cookie_quota: parseInt(quota) || 1 }) });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể cập nhật giới hạn cookie."), "error"); return; }
+  await apiFetch(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify({ cookie_quota: parseInt(quota) || 1 }) });
   loadAdminUsers();
 }
 
@@ -1528,8 +1621,7 @@ async function openAdminCookieUser(userId, username) {
 
 async function adminDeleteCookie(id) {
   if (!await sConfirm("Xóa cookie này khỏi hệ thống?")) return;
-  const res = await apiFetch(`/admin/cookies/${id}`, { method: "DELETE" });
-  if (!res.ok) { sAlert(await parseApiError(res, "Không thể xóa cookie khỏi hệ thống."), "error"); return; }
+  await apiFetch(`/admin/cookies/${id}`, { method: "DELETE" });
   if (adminCookieUserId) openAdminCookieUser(adminCookieUserId, document.getElementById("adminCookieTitle").textContent.replace("Kho cookie của ", ""));
 }
 
