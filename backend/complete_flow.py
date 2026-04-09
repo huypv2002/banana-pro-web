@@ -1429,14 +1429,13 @@ class LabsFlowClient:
         # 4. Reset browser contexts
         self._reset_browser_context_for_cookie(new_cookies)
         
-        # Reset zendriver
+        # Reset Chrome CDP tab/page state
         LabsFlowClient._zendriver_reset_page(cookie_hash)
         LabsFlowClient._zendriver_cookies_injected.pop(cookie_hash, None)
         
         # 5. Reset error counters
         LabsFlowClient._token_timestamps.pop(cookie_hash, None)
         self._reset_all_error_counters()
-        LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         if hasattr(self, '_403_refresh_retries'):
             self._403_refresh_retries[cookie_hash] = 0
         
@@ -2763,7 +2762,6 @@ class LabsFlowClient:
         
         # ✅ Reset all error counters cho cookie này
         self._reset_all_error_counters()
-        LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = 0
         
         print(f"  ✅ [403 Handler] Đã refresh cookie {cookie_hash[:8]}... - tab mới sẽ được tạo ở attempt tiếp theo")
@@ -2824,7 +2822,6 @@ class LabsFlowClient:
     def _on_api_success(self):
         """Gọi khi API call thành công - reset counters."""
         cookie_hash = self._cookie_hash
-        LabsFlowClient._zendriver_consecutive_403[cookie_hash] = 0
         LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = 0
         promoted_profile = LabsFlowClient._cookie_profile_fallbacks.get(cookie_hash)
         if promoted_profile:
@@ -2850,8 +2847,6 @@ class LabsFlowClient:
         if source == "chrome_cdp":
             count = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0) + 1
             LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = count
-            # Compat: cũng update zendriver counter
-            LabsFlowClient._zendriver_consecutive_403[cookie_hash] = count
             print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
             profile_path = self._get_profile_path_for_cookie()
             if profile_path:
@@ -2866,16 +2861,9 @@ class LabsFlowClient:
                         self.profile_path = alternate
                         LabsFlowClient._zendriver_reset_page(cookie_hash)
                         print(f"  🔄 [Profile] {Path(profile_path).name} bị 403 liên tiếp, chuyển sang profile: {Path(alternate).name}")
-        elif source == "zendriver":
-            # Backward compat
-            count = LabsFlowClient._zendriver_consecutive_403.get(cookie_hash, 0) + 1
-            LabsFlowClient._zendriver_consecutive_403[cookie_hash] = count
-            LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = count
-            print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
         else:
             count = LabsFlowClient._chrome_cdp_consecutive_403.get(cookie_hash, 0) + 1
             LabsFlowClient._chrome_cdp_consecutive_403[cookie_hash] = count
-            LabsFlowClient._zendriver_consecutive_403[cookie_hash] = count
             print(f"  📊 [Token Source] Chrome CDP 403 count: {count}/{self.MAX_CHROME_CDP_403}")
     
     def _should_use_zendriver(self) -> bool:
