@@ -2329,7 +2329,7 @@ class LabsFlowClient:
     
     def _get_recaptcha_token_zendriver(
         self,
-        timeout_s: int = 60,
+        timeout_s: int = 15,
         recaptcha_action: str = "VIDEO_GENERATION",
     ) -> Optional[str]:
         """
@@ -2937,7 +2937,7 @@ class LabsFlowClient:
             print(f"  🔵 [Token] Thử Chrome CDP trước (Chrome thật, off-screen)...")
             try:
                 token = self._get_recaptcha_token_zendriver(
-                    timeout_s=60,
+                    timeout_s=12,
                     recaptcha_action=recaptcha_action,
                 )
                 if token and len(token.strip()) > 0:
@@ -2955,9 +2955,9 @@ class LabsFlowClient:
 
             try:
                 LabsFlowClient._zendriver_reset_page(cookie_hash)
-                time.sleep(1.0)
+                time.sleep(0.6)
                 token = self._get_recaptcha_token_zendriver(
-                    timeout_s=75,
+                    timeout_s=15,
                     recaptcha_action=recaptcha_action,
                 )
                 if token and len(token.strip()) > 0:

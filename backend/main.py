@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Banana Pro API", version="1.0.0")
 
+MAX_ACTIVE_JOBS = max(1, int(os.environ.get("MAX_ACTIVE_JOBS", "1")))
+ENABLE_RECAPTCHA_POOL = os.environ.get("ENABLE_RECAPTCHA_POOL", "0") == "1"
+RECAPTCHA_POOL_SIZE = max(0, int(os.environ.get("RECAPTCHA_POOL_SIZE", "0")))
+SAFE_VIDEO_WORKERS = max(1, int(os.environ.get("SAFE_VIDEO_WORKERS", "1")))
+
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
@@ -74,7 +79,7 @@ def get_shared_proxyxoay():
 
 # --- FAIR QUEUE CẤP ĐỘ 1 ---
 class FairJobQueue:
-    def __init__(self, num_workers=5):
+    def __init__(self, num_workers=1):
         self.jobs = {}
         self.pending_by_user = {}
         self.user_queue = []
@@ -143,8 +148,8 @@ class FairJobQueue:
             except ValueError:
                 return 0
 
-# Khởi tạo Queue có sẵn 5 Slot xử lý song song
-fast_queue = FairJobQueue(num_workers=5)
+# Khởi tạo queue an toàn cho VPS RAM thấp
+fast_queue = FairJobQueue(num_workers=MAX_ACTIVE_JOBS)
 
 def _cleanup_upscaled():
     """Remove entries older than 10 minutes."""
@@ -268,9 +273,12 @@ pool_lock = threading.Lock()
 def init_recaptcha_pool():
     if os.environ.get("AUTO_RECAPTCHA") != "1":
         return
+    if not ENABLE_RECAPTCHA_POOL or RECAPTCHA_POOL_SIZE <= 0:
+        logger.info("Chrome CDP startup: reCAPTCHA pool đã tắt để giữ ổn định VPS.")
+        return
         
-    logger.info("Chrome CDP startup: Bắt đầu spawn 5 clean profiles (Tiết kiệm RAM) cho reCAPTCHA pool...")
-    for i in range(5):
+    logger.info(f"Chrome CDP startup: Bắt đầu spawn {RECAPTCHA_POOL_SIZE} clean profile(s) cho reCAPTCHA pool...")
+    for i in range(RECAPTCHA_POOL_SIZE):
         try:
             logger.info(f"Đang spawn instance {i+1}...")
             worker = RecaptchaWorker()
@@ -283,9 +291,12 @@ def init_recaptcha_pool():
 
 @app.on_event("startup")
 def startup_event():
-    # Spawn pool on background thread so it doesn't block API startup
-    t = threading.Thread(target=init_recaptcha_pool, daemon=True)
-    t.start()
+    logger.info(f"Queue startup: tối đa {MAX_ACTIVE_JOBS} job chạy đồng thời.")
+    if ENABLE_RECAPTCHA_POOL and RECAPTCHA_POOL_SIZE > 0:
+        t = threading.Thread(target=init_recaptcha_pool, daemon=True)
+        t.start()
+    else:
+        logger.info("Queue startup: không prewarm reCAPTCHA pool để tránh ngốn RAM VPS.")
 
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
@@ -568,9 +579,11 @@ class RecaptchaRequest(BaseModel):
 
 @app.post("/recaptcha-token")
 def get_recaptcha_token(req: RecaptchaRequest):
-    """Lấy reCAPTCHA token từ pool 5 Chrome profiles song song, không cần inject cookies."""
+    """Lấy reCAPTCHA token từ pool nếu pool được bật rõ ràng."""
     global pool_idx
     try:
+        if not ENABLE_RECAPTCHA_POOL or RECAPTCHA_POOL_SIZE <= 0:
+            return {"ok": False, "error": "reCAPTCHA pool đang bị tắt để bảo vệ tài nguyên VPS."}
         with pool_lock:
             workers = list(pool_workers)
             
@@ -871,18 +884,8 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
     proxy_config = get_shared_proxyxoay()
     ref_images = ref_images or {}
     end_images = end_images or {}
-    # Business rule:
-    # - T2V: 1 video => 3 workers, 2 videos => 2 workers, 3/4 videos => sequential
-    # - All other modes => sequential
-    if mode == "t2v":
-        if num_videos <= 1:
-            workers = 3
-        elif num_videos == 2:
-            workers = 2
-        else:
-            workers = 1
-    else:
-        workers = 1
+    # VPS 8GB: luôn ép video chạy tuần tự để tránh spawn nhiều Chrome cùng lúc.
+    workers = SAFE_VIDEO_WORKERS
     is_portrait = "9_16" in model
     aspect = "VIDEO_ASPECT_RATIO_PORTRAIT" if is_portrait else "VIDEO_ASPECT_RATIO_LANDSCAPE"
     MAP = {"t2v": VIDEO_MODEL_MAP, "i2v": VIDEO_I2V_MODEL_MAP,
@@ -913,7 +916,7 @@ def _run_video_generation(job_id: str, cookie: str, prompts: List[str],
                 return c
             return get_client_with_fallback(cookie_dict, proxy_config=proxy_config)
 
-        workers = max(1, workers * len(cookie_dicts))
+        workers = 1
 
         def process_prompt(idx, prompt, client=None):
             """Xử lý 1 prompt, trả về result dict."""
